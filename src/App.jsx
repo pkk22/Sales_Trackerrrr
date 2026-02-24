@@ -883,41 +883,178 @@ function SalesPage({ orders }) {
   );
 }
 
+// ─── Editable OCR result row ──────────────────────────────────────────────────
+function OcrItemRow({ item, onAdd, onDismiss }) {
+  const [name,     setName]     = useState(item.name);
+  const [category, setCategory] = useState(item.category);
+  const [price,    setPrice]    = useState(String(item.price));
+
+  return (
+    <div style={{ display:"grid", gridTemplateColumns:"1fr 90px 70px auto auto", gap:6, alignItems:"center", padding:"8px 0", borderBottom:"1px solid var(--border)" }}>
+      <input className="input" style={{ padding:"5px 10px", fontSize:13 }} value={name}     onChange={e => setName(e.target.value)} placeholder="Item name" />
+      <input className="input" style={{ padding:"5px 10px", fontSize:13 }} value={category} onChange={e => setCategory(e.target.value)} placeholder="Category" />
+      <input className="input" style={{ padding:"5px 10px", fontSize:13 }} value={price}    onChange={e => setPrice(e.target.value)} placeholder="₹" type="number" />
+      <button className="btn btn-success" style={{ padding:"5px 12px", fontSize:12, whiteSpace:"nowrap" }}
+        onClick={() => onAdd({ name: name.trim(), category: category.trim() || "Other", price: Number(price) || 0 })}>
+        + Add
+      </button>
+      <button className="btn btn-ghost" style={{ padding:"5px 8px", fontSize:12 }} onClick={onDismiss}>✕</button>
+    </div>
+  );
+}
+
+
+let tesseractReady = false;
+let tesseractLoading = false;
+const tesseractCallbacks = [];
+
+function loadTesseract() {
+  return new Promise((resolve) => {
+    if (tesseractReady) { resolve(); return; }
+    tesseractCallbacks.push(resolve);
+    if (tesseractLoading) return;
+    tesseractLoading = true;
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.0/tesseract.min.js";
+    s.onload = () => {
+      tesseractReady = true;
+      tesseractCallbacks.forEach(cb => cb());
+    };
+    document.head.appendChild(s);
+  });
+}
+
+// ─── OCR text → menu items parser ────────────────────────────────────────────
+// Handles common menu layouts: "Item Name .... 250", "Item Name Rs 250", etc.
+function parseMenuText(rawText) {
+  const lines = rawText.split("\n").map(l => l.trim()).filter(l => l.length > 2);
+  const results = [];
+
+  // Price patterns: ₹250, Rs.250, Rs 250, 250/-, 250.00, plain number at end
+  const priceRe = /(?:₹|Rs\.?|INR)?\s*(\d{2,4})(?:\.\d{0,2})?(?:\s*\/-)?/i;
+
+  // Words that indicate it's NOT a menu item (section headers, descriptions, etc.)
+  const skipWords = /^(menu|starter|starters|main|mains|dessert|desserts|drink|drinks|bread|breads|special|today|price|item|name|category|qty|tax|total|subtotal|gst|inclusive|exclusive|rupee|note|chef|welcome|enjoy|call|table|no\.?|order|contact|phone|address|email)$/i;
+
+  // Category guesser based on keywords in item name
+  const guessCategory = (name) => {
+    const n = name.toLowerCase();
+    if (/chicken|mutton|fish|prawn|lamb|seekh|kebab|tikka|tandoor/.test(n)) return "Non-Veg";
+    if (/paneer|tofu|veg|dal|palak|aloo|gobi|mushroom|rajma|chana/.test(n)) return "Main";
+    if (/naan|roti|paratha|kulcha|bread|puri|bhatura/.test(n)) return "Bread";
+    if (/rice|biryani|pulao|fried rice/.test(n)) return "Rice";
+    if (/soup|salad|raita/.test(n)) return "Starter";
+    if (/lassi|chai|tea|coffee|juice|soda|water|shake|drink|mojito|lemon/.test(n)) return "Drink";
+    if (/gulab|kheer|halwa|ice cream|dessert|sweet|barfi|ladoo|kulfi/.test(n)) return "Dessert";
+    if (/starter|tikka|cutlet|roll|wrap|chaat|samosa|bhel/.test(n)) return "Starter";
+    return "Main";
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Must contain a price somewhere
+    const priceMatch = line.match(priceRe);
+    if (!priceMatch) continue;
+
+    const price = parseInt(priceMatch[1]);
+    // Sanity check: prices on a restaurant menu are typically ₹20–₹2000
+    if (price < 20 || price > 2000) continue;
+
+    // Extract item name = everything before the price token
+    let name = line.slice(0, line.search(priceRe)).trim();
+    // Strip leading bullet / number / dash
+    name = name.replace(/^[\d\.\-\•\*\+]+\s*/, "").trim();
+    // Strip trailing dots/dashes (e.g. "Butter Chicken .......")
+    name = name.replace(/[\.\-\s]+$/, "").trim();
+    // Strip non-alpha chars at start
+    name = name.replace(/^[^a-zA-Z₹]+/, "").trim();
+
+    // Must have at least 3 chars and not be a skip word
+    if (name.length < 3) continue;
+    const firstWord = name.split(/\s+/)[0];
+    if (skipWords.test(firstWord)) continue;
+
+    // Avoid duplicates
+    if (results.find(r => r.name.toLowerCase() === name.toLowerCase())) continue;
+
+    results.push({ name, category: guessCategory(name), price });
+  }
+
+  return results;
+}
+
 // ─── Page: Menu Manager ───────────────────────────────────────────────────────
 function MenuPage({ menu, setMenu, toast }) {
-  const [mediaItems, setMediaItems] = useState([]);   // {id, type:'image'|'pdf', src, name, ocrDone}
+  const [mediaItems, setMediaItems] = useState([]);
   const [showCam,    setShowCam]    = useState(false);
   const [camStream,  setCamStream]  = useState(null);
   const [flashOn,    setFlashOn]    = useState(false);
   const [drag,       setDrag]       = useState(false);
   const [ocrItems,   setOcrItems]   = useState([]);
+  const [ocrRawText, setOcrRawText] = useState("");   // show raw text for manual review
+  const [showRaw,    setShowRaw]    = useState(false);
   const [form,       setForm]       = useState({ name:"", category:"", price:"" });
   const videoRef    = useRef(null);
   const imgInputRef = useRef(null);
   const pdfInputRef = useRef(null);
 
-  // Simulate OCR after each new media item
-  const runOCR = (id) => {
-    const delay = 1800 + Math.random() * 900;
-    setTimeout(() => {
-      setMediaItems(prev => prev.map(m => m.id === id ? { ...m, ocrDone:true } : m));
-      const mock = [
-        { name:"Chef's Special",  category:"Main",  price:320 },
-        { name:"Masala Soda",     category:"Drink", price:45  },
-        { name:"Paneer Manchurian",category:"Starter",price:190},
-      ];
+  // ── Real Tesseract.js OCR ──────────────────────────────────────────────────
+  const runOCR = async (id, imageSrc) => {
+    // Lazy-load Tesseract from CDN
+    await loadTesseract();
+
+    const { createWorker } = window.Tesseract;
+    const worker = await createWorker("eng", 1, {
+      // Tuned for menus: dense text, mixed fonts
+      logger: () => {},
+    });
+
+    // PSM 6 = assume a single uniform block of text (best for menu pages)
+    await worker.setParameters({
+      tessedit_pageseg_mode: "6",
+      // Whitelist chars useful for menus
+      tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789₹/-.,()'& ",
+      preserve_interword_spaces: "1",
+    });
+
+    let rawText = "";
+    try {
+      const { data } = await worker.recognize(imageSrc);
+      rawText = data.text;
+    } catch (e) {
+      toast("OCR failed — try a clearer photo");
+    } finally {
+      await worker.terminate();
+    }
+
+    setMediaItems(prev => prev.map(m => m.id === id ? { ...m, ocrDone: true, rawText } : m));
+    setOcrRawText(prev => prev + (prev ? "\n\n---\n\n" : "") + rawText);
+
+    const parsed = parseMenuText(rawText);
+    if (parsed.length === 0) {
+      toast("OCR found no menu items — try a sharper photo or add manually");
+    } else {
       setOcrItems(prev => {
-        const existing = new Set(prev.map(i => i.name));
-        return [...prev, ...mock.filter(d => !existing.has(d.name))];
+        const existing = new Set(prev.map(i => i.name.toLowerCase()));
+        const fresh = parsed.filter(p => !existing.has(p.name.toLowerCase()));
+        return [...prev, ...fresh];
       });
-      toast("OCR scan complete — review items below");
-    }, delay);
+      toast(`OCR found ${parsed.length} item${parsed.length > 1 ? "s" : ""} — review below`);
+    }
   };
 
   const addMedia = (type, src, name) => {
     const id = generateId();
     setMediaItems(prev => [...prev, { id, type, src, name, ocrDone:false }]);
-    runOCR(id);
+    if (type === "image" && src) runOCR(id, src);
+    else {
+      // PDF: no browser-side OCR without a server; mark done and guide user
+      setTimeout(() => {
+        setMediaItems(prev => prev.map(m => m.id === id ? { ...m, ocrDone:true } : m));
+        toast("PDF uploaded — OCR works on images; please export PDF pages as images for best results");
+      }, 1000);
+    }
   };
 
   const removeMedia = (id) => setMediaItems(prev => prev.filter(m => m.id !== id));
@@ -967,12 +1104,6 @@ function MenuPage({ menu, setMenu, toast }) {
   };
 
   const closeCamera = () => { camStream?.getTracks().forEach(t=>t.stop()); setCamStream(null); setShowCam(false); };
-
-  const addOcrItem = (item) => {
-    setMenu(prev => [...prev, { ...item, id:Date.now() }]);
-    setOcrItems(prev => prev.filter(i => i !== item));
-    toast(`"${item.name}" added to menu!`);
-  };
 
   const addMenuItem = () => {
     if (!form.name || !form.price) return;
@@ -1065,20 +1196,39 @@ function MenuPage({ menu, setMenu, toast }) {
             </div>
           )}
 
-          {/* OCR detected items */}
+          {/* OCR detected items — editable before adding */}
           {ocrItems.length > 0 && (
             <div style={{ marginTop:14, borderTop:"1px solid var(--border)", paddingTop:14 }}>
-              <div style={{ fontSize:12, fontWeight:700, color:"var(--accent4)", textTransform:"uppercase", letterSpacing:".06em", marginBottom:10 }}>
-                🔬 OCR Detected — click to add
-              </div>
-              {ocrItems.map((item, i) => (
-                <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid var(--border)" }}>
-                  <div>
-                    <div style={{ fontSize:14, fontWeight:500 }}>{item.name}</div>
-                    <div style={{ fontSize:12, color:"var(--muted)" }}>{item.category} · {fmt(item.price)}</div>
-                  </div>
-                  <button className="btn btn-success" style={{ padding:"4px 12px", fontSize:12 }} onClick={() => addOcrItem(item)}>+ Add</button>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                <div style={{ fontSize:12, fontWeight:700, color:"var(--accent4)", textTransform:"uppercase", letterSpacing:".06em" }}>
+                  🔬 OCR Detected ({ocrItems.length}) — edit & add
                 </div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button className="btn btn-ghost" style={{ padding:"3px 10px", fontSize:11 }} onClick={() => setShowRaw(v => !v)}>
+                    {showRaw ? "Hide" : "Raw text"}
+                  </button>
+                  <button className="btn btn-success" style={{ padding:"3px 10px", fontSize:11 }} onClick={() => {
+                    ocrItems.forEach(item => setMenu(prev => [...prev, { ...item, id:Date.now() + Math.random() }]));
+                    setOcrItems([]);
+                    toast("All detected items added!");
+                  }}>+ Add All</button>
+                </div>
+              </div>
+
+              {showRaw && (
+                <textarea readOnly value={ocrRawText}
+                  style={{ width:"100%", height:120, background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:8, color:"var(--muted)", fontSize:11, fontFamily:"monospace", padding:10, marginBottom:10, resize:"vertical" }} />
+              )}
+
+              {ocrItems.map((item, i) => (
+                <OcrItemRow key={i} item={item}
+                  onAdd={(edited) => {
+                    setMenu(prev => [...prev, { ...edited, id:Date.now() }]);
+                    setOcrItems(prev => prev.filter((_, j) => j !== i));
+                    toast(`"${edited.name}" added!`);
+                  }}
+                  onDismiss={() => setOcrItems(prev => prev.filter((_, j) => j !== i))}
+                />
               ))}
             </div>
           )}
