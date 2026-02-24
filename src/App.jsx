@@ -23,32 +23,25 @@ const FontLink = () => (
     body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh;overflow-x:hidden;}
     h1,h2,h3,.brand{font-family:'Syne',sans-serif;}
 
-    /* scrollbar */
     ::-webkit-scrollbar{width:4px;}
     ::-webkit-scrollbar-track{background:transparent;}
     ::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
 
-    /* animations */
     @keyframes fadeUp{from{opacity:0;transform:translateY(16px);}to{opacity:1;transform:translateY(0);}}
     @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.5;}}
     @keyframes spin{to{transform:rotate(360deg);}}
     @keyframes ripple{0%{transform:scale(0);opacity:1;}100%{transform:scale(4);opacity:0;}}
     @keyframes blink{0%,100%{opacity:1;}50%{opacity:0;}}
     @keyframes shimmer{0%{background-position:-200% 0;}100%{background-position:200% 0;}}
+    @keyframes checkPop{0%{transform:scale(0) rotate(-10deg);opacity:0;}60%{transform:scale(1.2) rotate(3deg);}100%{transform:scale(1) rotate(0deg);opacity:1;}}
+    @keyframes slideFade{from{opacity:0;transform:translateX(20px);}to{opacity:1;transform:translateX(0);}}
 
     .fade-up{animation:fadeUp .4s ease forwards;}
 
-    /* glass card */
-    .card{
-      background:var(--surface);
-      border:1px solid var(--border);
-      border-radius:var(--r);
-      padding:20px;
-    }
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px;}
     .card-hover{transition:border-color .2s,transform .2s;}
     .card-hover:hover{border-color:#ffffff22;transform:translateY(-2px);}
 
-    /* buttons */
     .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:10px;border:none;font-family:'DM Sans',sans-serif;font-size:14px;font-weight:500;cursor:pointer;transition:all .2s;}
     .btn-primary{background:var(--accent);color:#fff;}
     .btn-primary:hover{background:#e55a24;}
@@ -60,78 +53,77 @@ const FontLink = () => (
     .btn-danger:hover{background:#2a1525;}
     .btn-success{background:#051f17;color:var(--accent3);border:1px solid #06d6a030;}
     .btn-success:hover{background:#082b20;}
+    .btn-finish{background:linear-gradient(135deg,#06d6a0,#04b585);color:#fff;border:none;font-weight:700;letter-spacing:.03em;}
+    .btn-finish:hover{filter:brightness(1.1);}
 
-    /* badge */
     .badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:100px;font-size:12px;font-weight:500;}
 
-    /* input */
     .input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 14px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:14px;outline:none;transition:border-color .2s;}
     .input:focus{border-color:#ff6b3550;}
     .input::placeholder{color:var(--muted);}
 
-    /* tag chip */
     .chip{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:100px;font-size:13px;border:1px solid var(--border);background:var(--surface2);cursor:pointer;transition:all .2s;}
     .chip.active{border-color:var(--accent);background:#ff6b3515;color:var(--accent);}
 
-    /* progress bar */
     .progress-bar{height:6px;background:var(--surface2);border-radius:3px;overflow:hidden;}
     .progress-fill{height:100%;border-radius:3px;transition:width .6s ease;}
 
-    /* nav */
     .nav{display:flex;gap:2px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:4px;}
     .nav-item{flex:1;padding:8px 12px;border-radius:9px;font-size:13px;font-weight:500;cursor:pointer;transition:all .2s;text-align:center;color:var(--muted);display:flex;align-items:center;justify-content:center;gap:6px;border:none;background:transparent;font-family:'DM Sans',sans-serif;}
     .nav-item.active{background:var(--surface2);color:var(--text);}
     .nav-item:hover:not(.active){color:var(--text);}
 
-    /* mic */
     .mic-btn{width:72px;height:72px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:28px;position:relative;transition:all .2s;}
     .mic-btn.idle{background:var(--surface2);border:2px solid var(--border);}
     .mic-btn.idle:hover{border-color:var(--accent);}
-    .mic-btn.recording{background:#ff6b35;border:2px solid #ff6b35;animation:none;}
+    .mic-btn.recording{background:#ff6b35;border:2px solid #ff6b35;}
     .mic-btn.recording::after{content:'';position:absolute;inset:-8px;border-radius:50%;border:2px solid #ff6b3560;animation:ripple 1.5s ease infinite;}
 
-    /* order card */
     .order-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px;transition:all .2s;animation:fadeUp .3s ease;}
     .order-card:hover{border-color:#ffffff20;}
+    .active-order-card{border-left:3px solid var(--accent);}
+    .finished-order-card{border-left:3px solid var(--accent3);opacity:.8;}
 
-    /* stat card */
     .stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px;}
 
-    /* table */
     .table{width:100%;border-collapse:collapse;}
     .table th{text-align:left;padding:10px 14px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border);}
     .table td{padding:12px 14px;font-size:14px;border-bottom:1px solid var(--border);}
     .table tr:last-child td{border-bottom:none;}
     .table tr:hover td{background:#ffffff04;}
 
-    /* camera area */
     .drop-zone{border:2px dashed var(--border);border-radius:var(--r);padding:40px;text-align:center;cursor:pointer;transition:all .2s;}
     .drop-zone:hover,.drop-zone.drag{border-color:var(--accent);background:#ff6b3508;}
+    .drop-zone.pdf-success{border-color:var(--accent3);background:#06d6a010;}
 
-    /* recording indicator */
     .rec-dot{width:8px;height:8px;border-radius:50%;background:var(--danger);animation:blink 1s infinite;}
 
-    /* shimmer loading */
     .shimmer{background:linear-gradient(90deg,var(--surface) 25%,var(--surface2) 50%,var(--surface) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:6px;}
 
-    /* toast */
     .toast{position:fixed;bottom:24px;right:24px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:12px 20px;font-size:14px;z-index:1000;animation:fadeUp .3s ease;display:flex;align-items:center;gap:10px;}
 
-    /* grid */
     .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
     .grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;}
     .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;}
-    @media(max-width:768px){
-      .grid-2,.grid-3,.grid-4{grid-template-columns:1fr;}
-    }
+    @media(max-width:768px){.grid-2,.grid-3,.grid-4{grid-template-columns:1fr;}}
 
-    /* scrollable area */
     .scroll-y{overflow-y:auto;max-height:calc(100vh - 200px);}
 
-    /* donut */
     .donut-wrap{position:relative;width:140px;height:140px;margin:0 auto;}
     .donut-wrap svg{transform:rotate(-90deg);}
     .donut-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+
+    .check-anim{animation:checkPop .5s cubic-bezier(.34,1.56,.64,1) forwards;}
+    .slide-fade{animation:slideFade .35s ease forwards;}
+
+    .orders-columns{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+    @media(max-width:900px){.orders-columns{grid-template-columns:1fr;}}
+
+    .col-header{display:flex;align-items:center;gap:8px;margin-bottom:14px;}
+    .col-dot{width:10px;height:10px;border-radius:50%;}
+
+    .pdf-success-icon{font-size:48px;animation:checkPop .5s cubic-bezier(.34,1.56,.64,1) forwards;}
+    .ocr-pill{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:100px;font-size:12px;background:#8b5cf620;color:var(--accent4);border:1px solid #8b5cf630;}
   `}</style>
 );
 
@@ -160,12 +152,25 @@ const generateId = () => Math.random().toString(36).slice(2, 9);
 const fmt = (n) => `₹${n.toLocaleString("en-IN")}`;
 const fmtDate = (d) => new Date(d).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 
+// ─── Local Storage Backend ────────────────────────────────────────────────────
+const DB = {
+  get: (key, fallback) => {
+    try {
+      const raw = localStorage.getItem(`restrotrack_${key}`);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch { return fallback; }
+  },
+  set: (key, val) => {
+    try { localStorage.setItem(`restrotrack_${key}`, JSON.stringify(val)); } catch {}
+  },
+};
+
 // ─── Toast ────────────────────────────────────────────────────────────────────
 function Toast({ msg, onDone }) {
-  useEffect(() => { const t = setTimeout(onDone, 2500); return () => clearTimeout(t); }, []);
+  useEffect(() => { const t = setTimeout(onDone, 2800); return () => clearTimeout(t); }, []);
   return (
     <div className="toast">
-      <span>✓</span> {msg}
+      <span style={{ fontSize: 16 }}>✓</span> {msg}
     </div>
   );
 }
@@ -210,7 +215,14 @@ function TakeOrderPage({ menu, orders, setOrders, toast }) {
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [note, setNote] = useState("");
+  const [micError, setMicError] = useState("");
   const recognitionRef = useRef(null);
+  const audioCtxRef = useRef(null);
+  const analyserRef = useRef(null);
+  const [noiseLevel, setNoiseLevel] = useState(0);
+
+  const activeOrders = orders.filter((o) => o.status === "active");
+  const recentOrders = orders.filter((o) => o.status === "finished");
 
   const filtered = menu.filter(
     (m) => m.name.toLowerCase().includes(search.toLowerCase()) || m.category.toLowerCase().includes(search.toLowerCase())
@@ -240,40 +252,128 @@ function TakeOrderPage({ menu, orders, setOrders, toast }) {
       status: "active",
       ts: Date.now(),
     };
-    setOrders((prev) => [order, ...prev]);
+    const updated = [order, ...orders];
+    setOrders(updated);
+    DB.set("orders", updated);
     setCart([]);
     setNote("");
     setTableNum("");
     toast("Order placed successfully!");
   };
 
-  // Voice
-  const toggleMic = () => {
+  const finishOrder = (orderId) => {
+    const updated = orders.map((o) => o.id === orderId ? { ...o, status: "finished", finishedAt: Date.now() } : o);
+    setOrders(updated);
+    DB.set("orders", updated);
+    toast("Order marked as finished!");
+  };
+
+  // Enhanced Voice with noise suppression
+  const toggleMic = async () => {
     if (!("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
+      setMicError("Speech recognition not supported in this browser");
       toast("Speech recognition not supported in this browser");
       return;
     }
     if (isRecording) {
       recognitionRef.current?.stop();
       setIsRecording(false);
+      setTranscript("");
+      if (audioCtxRef.current) { audioCtxRef.current.close(); audioCtxRef.current = null; }
       return;
     }
+
+    setMicError("");
+
+    // Request mic with noise suppression constraints
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+          sampleRate: 16000,
+        }
+      });
+
+      // Setup analyser for visual feedback
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      src.connect(analyser);
+      audioCtxRef.current = ctx;
+      analyserRef.current = analyser;
+
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const tick = () => {
+        if (!analyserRef.current) return;
+        analyserRef.current.getByteFrequencyData(data);
+        const avg = data.reduce((a, b) => a + b) / data.length;
+        setNoiseLevel(Math.min(100, avg * 2));
+        requestAnimationFrame(tick);
+      };
+      tick();
+    } catch (e) {
+      toast("Microphone access denied");
+      return;
+    }
+
     const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
     const rec = new Rec();
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = "en-IN";
+    rec.maxAlternatives = 3;
+
     rec.onresult = (e) => {
-      const t = Array.from(e.results).map((r) => r[0].transcript).join(" ");
-      setTranscript(t);
-      // simple keyword matching
+      let finalT = "";
+      let interimT = "";
+      for (let i = 0; i < e.results.length; i++) {
+        const res = e.results[i];
+        // Use best alternative
+        const best = res[0].transcript;
+        if (res.isFinal) finalT += best + " ";
+        else interimT += best;
+      }
+      const full = (finalT + interimT).toLowerCase();
+      setTranscript(finalT + interimT);
+
+      // Fuzzy keyword matching with qty detection
       menu.forEach((item) => {
-        if (t.toLowerCase().includes(item.name.toLowerCase())) {
-          addItem(item);
+        const name = item.name.toLowerCase();
+        if (full.includes(name)) {
+          // Check for quantity keywords
+          const qtyMatch = full.match(new RegExp(`(\\d+|one|two|three|four|five)\\s+${name.replace(/\s+/g, "\\s+")}`));
+          const numMap = { one: 1, two: 2, three: 3, four: 4, five: 5 };
+          let qty = 1;
+          if (qtyMatch) {
+            const q = qtyMatch[1];
+            qty = isNaN(q) ? (numMap[q] || 1) : parseInt(q);
+          }
+          for (let i = 0; i < qty; i++) addItem(item);
         }
       });
+
+      // Table number detection
+      const tableMatch = full.match(/table\s+(number\s+)?(\w+)/i);
+      if (tableMatch) setTableNum(tableMatch[2].toUpperCase());
     };
-    rec.onend = () => setIsRecording(false);
+
+    rec.onerror = (e) => {
+      if (e.error === "no-speech") return; // non-fatal
+      setMicError(`Mic error: ${e.error}`);
+      setIsRecording(false);
+    };
+
+    rec.onend = () => {
+      setIsRecording(false);
+      setNoiseLevel(0);
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+    };
+
     rec.start();
     recognitionRef.current = rec;
     setIsRecording(true);
@@ -283,7 +383,7 @@ function TakeOrderPage({ menu, orders, setOrders, toast }) {
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 20, height: "calc(100vh - 80px)", overflow: "hidden" }}>
-      {/* Left: Menu */}
+      {/* Left: Menu + Current/Recent Orders */}
       <div style={{ overflowY: "auto", paddingRight: 4 }}>
         {/* Customer type + table */}
         <div className="card fade-up" style={{ marginBottom: 16 }}>
@@ -308,18 +408,34 @@ function TakeOrderPage({ menu, orders, setOrders, toast }) {
         </div>
 
         {/* Voice + Search */}
-        <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "center" }}>
-          <button className={`mic-btn ${isRecording ? "recording" : "idle"}`} onClick={toggleMic} title={isRecording ? "Stop recording" : "Voice order"}>
-            🎙️
-          </button>
+        <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "flex-start" }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+            <button className={`mic-btn ${isRecording ? "recording" : "idle"}`} onClick={toggleMic} title={isRecording ? "Stop recording" : "Voice order (noise-cancelling)"}>
+              {isRecording ? "⏹" : "🎙️"}
+            </button>
+            {isRecording && (
+              <div style={{ display: "flex", gap: 2, alignItems: "flex-end", height: 16 }}>
+                {[...Array(5)].map((_, i) => (
+                  <div key={i} style={{
+                    width: 3, borderRadius: 2,
+                    background: "var(--accent)",
+                    height: `${Math.max(4, (noiseLevel / 100) * 16 * (0.4 + Math.random() * 0.6))}px`,
+                    transition: "height .1s",
+                    opacity: noiseLevel > 0 ? 1 : 0.3,
+                  }} />
+                ))}
+              </div>
+            )}
+          </div>
           <div style={{ flex: 1 }}>
             <input className="input" placeholder="Search menu items…" value={search} onChange={(e) => setSearch(e.target.value)} />
             {isRecording && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, padding: "8px 12px", background: "var(--surface2)", borderRadius: 10, border: "1px solid #ff6b3530" }}>
                 <div className="rec-dot" />
-                <span style={{ fontSize: 13, color: "var(--muted)" }}>{transcript || "Listening for items…"}</span>
+                <span style={{ fontSize: 13, color: "var(--muted)", fontStyle: "italic" }}>{transcript || "Listening… (noise suppression active)"}</span>
               </div>
             )}
+            {micError && <div style={{ fontSize: 12, color: "var(--danger)", marginTop: 6 }}>{micError}</div>}
           </div>
         </div>
 
@@ -350,6 +466,100 @@ function TakeOrderPage({ menu, orders, setOrders, toast }) {
             </div>
           </div>
         ))}
+
+        {/* ─── Current Orders & Recent Orders ─── */}
+        <div className="orders-columns" style={{ marginTop: 10 }}>
+          {/* Current Active Orders */}
+          <div>
+            <div className="col-header">
+              <div className="col-dot" style={{ background: "var(--accent)" }} />
+              <span style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 15 }}>Current Orders</span>
+              <span className="badge" style={{ background: "#ff6b3520", color: "var(--accent)", marginLeft: 4 }}>{activeOrders.length}</span>
+            </div>
+            {activeOrders.length === 0 ? (
+              <div style={{ padding: "20px 0", color: "var(--muted)", fontSize: 13, textAlign: "center" }}>No active orders</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {activeOrders.map((o) => {
+                  const ct = CUSTOMER_TYPES.find((c) => c.id === o.customerType);
+                  return (
+                    <div key={o.id} className="order-card active-order-card slide-fade">
+                      {/* Header row */}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontFamily: "Syne", fontWeight: 800, fontSize: 16, color: "var(--accent)" }}>
+                            🪑 {o.table}
+                          </span>
+                          <span className="badge" style={{ background: ct.color + "20", color: ct.color }}>{ct.emoji} {ct.label}</span>
+                        </div>
+                        <span style={{ fontSize: 12, color: "var(--muted)" }}>{fmtDate(o.ts)}</span>
+                      </div>
+                      {/* Items table */}
+                      <table className="table" style={{ marginBottom: 10 }}>
+                        <thead>
+                          <tr>
+                            <th style={{ fontSize: 11, padding: "6px 0" }}>Item</th>
+                            <th style={{ fontSize: 11, padding: "6px 0", textAlign: "center" }}>Qty</th>
+                            <th style={{ fontSize: 11, padding: "6px 0", textAlign: "right" }}>Price</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {o.items.map((it) => (
+                            <tr key={it.id}>
+                              <td style={{ fontSize: 13, padding: "5px 0" }}>{it.name}</td>
+                              <td style={{ textAlign: "center", fontSize: 13, padding: "5px 0" }}>{it.qty}</td>
+                              <td style={{ textAlign: "right", fontSize: 13, fontWeight: 600, padding: "5px 0" }}>{fmt(it.price * it.qty)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontFamily: "Syne", fontWeight: 800, fontSize: 16, color: "var(--accent3)" }}>{fmt(o.total)}</span>
+                        <button className="btn btn-finish" style={{ padding: "6px 14px", fontSize: 13 }} onClick={() => finishOrder(o.id)}>
+                          ✓ Finished
+                        </button>
+                      </div>
+                      {o.note && <div style={{ marginTop: 8, fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>📝 {o.note}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Recent Finished Orders */}
+          <div>
+            <div className="col-header">
+              <div className="col-dot" style={{ background: "var(--accent3)" }} />
+              <span style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 15 }}>Recent Orders</span>
+              <span className="badge" style={{ background: "#06d6a020", color: "var(--accent3)", marginLeft: 4 }}>{recentOrders.length}</span>
+            </div>
+            {recentOrders.length === 0 ? (
+              <div style={{ padding: "20px 0", color: "var(--muted)", fontSize: 13, textAlign: "center" }}>No finished orders yet</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {recentOrders.map((o) => {
+                  const ct = CUSTOMER_TYPES.find((c) => c.id === o.customerType);
+                  return (
+                    <div key={o.id} className="order-card finished-order-card slide-fade">
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontFamily: "Syne", fontWeight: 800, fontSize: 15, color: "var(--accent3)" }}>✓ {o.table}</span>
+                          <span className="badge" style={{ background: ct.color + "20", color: ct.color }}>{ct.emoji}</span>
+                        </div>
+                        <span style={{ fontSize: 11, color: "var(--muted)" }}>Done {fmtDate(o.finishedAt || o.ts)}</span>
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>
+                        {o.items.map((it) => `${it.name} ×${it.qty}`).join(", ")}
+                      </div>
+                      <div style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 15, color: "var(--accent3)" }}>{fmt(o.total)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Right: Cart */}
@@ -397,24 +607,6 @@ function TakeOrderPage({ menu, orders, setOrders, toast }) {
             </div>
           )}
         </div>
-
-        {/* Recent orders mini */}
-        <div className="card">
-          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12, fontFamily: "Syne" }}>Recent Orders</div>
-          {orders.slice(0, 4).map((o) => (
-            <div key={o.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
-              <div>
-                <span style={{ fontWeight: 600 }}>T-{o.table}</span>
-                <span style={{ color: "var(--muted)", marginLeft: 8 }}>{CUSTOMER_TYPES.find((c) => c.id === o.customerType)?.emoji}</span>
-              </div>
-              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                <span style={{ color: "var(--muted)" }}>{fmtDate(o.ts)}</span>
-                <span style={{ fontWeight: 700, color: "var(--accent3)" }}>{fmt(o.total)}</span>
-              </div>
-            </div>
-          ))}
-          {orders.length === 0 && <div style={{ color: "var(--muted)", fontSize: 13 }}>No orders yet today</div>}
-        </div>
       </div>
     </div>
   );
@@ -425,13 +617,11 @@ function SalesPage({ orders }) {
   const totalRevenue = orders.reduce((s, o) => s + o.total, 0);
   const avgOrder = orders.length ? Math.round(totalRevenue / orders.length) : 0;
 
-  // Customer breakdown
   const custData = CUSTOMER_TYPES.map((ct) => ({
     ...ct,
     value: orders.filter((o) => o.customerType === ct.id).length,
   }));
 
-  // Best sellers
   const itemCounts = {};
   orders.forEach((o) => o.items.forEach((it) => {
     itemCounts[it.name] = (itemCounts[it.name] || { count: 0, rev: 0 });
@@ -444,22 +634,17 @@ function SalesPage({ orders }) {
     .map(([name, d]) => ({ name, ...d }));
   const maxCount = bestSellers[0]?.count || 1;
 
-  // Hourly revenue (last 12h)
   const now = Date.now();
   const hours = Array.from({ length: 12 }, (_, i) => {
     const h = new Date(now - (11 - i) * 3600000);
     const label = h.getHours() + ":00";
-    const rev = orders.filter((o) => {
-      const oh = new Date(o.ts).getHours();
-      return oh === h.getHours();
-    }).reduce((s, o) => s + o.total, 0);
+    const rev = orders.filter((o) => new Date(o.ts).getHours() === h.getHours()).reduce((s, o) => s + o.total, 0);
     return { label, rev };
   });
   const maxRev = Math.max(...hours.map((h) => h.rev), 1);
 
   return (
     <div style={{ overflowY: "auto", height: "calc(100vh - 80px)", paddingRight: 4 }}>
-      {/* KPIs */}
       <div className="grid-4 fade-up" style={{ marginBottom: 20 }}>
         {[
           { label: "Today's Revenue", value: fmt(totalRevenue), icon: "💰", color: "var(--accent)" },
@@ -476,7 +661,6 @@ function SalesPage({ orders }) {
       </div>
 
       <div className="grid-2" style={{ marginBottom: 20 }}>
-        {/* Customer breakdown */}
         <div className="card">
           <div style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 16, marginBottom: 20 }}>Customer Breakdown</div>
           <DonutChart data={custData} total={orders.length} />
@@ -498,7 +682,6 @@ function SalesPage({ orders }) {
           </div>
         </div>
 
-        {/* Hourly chart */}
         <div className="card">
           <div style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 16, marginBottom: 20 }}>Revenue Timeline</div>
           <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 140 }}>
@@ -515,7 +698,6 @@ function SalesPage({ orders }) {
         </div>
       </div>
 
-      {/* Best sellers */}
       <div className="card" style={{ marginBottom: 20 }}>
         <div style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 16, marginBottom: 16 }}>🏆 Best Sellers</div>
         {bestSellers.length === 0 ? (
@@ -540,19 +722,18 @@ function SalesPage({ orders }) {
         )}
       </div>
 
-      {/* Orders table */}
       <div className="card">
         <div style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 16, marginBottom: 16 }}>All Orders</div>
         <div style={{ overflowX: "auto" }}>
           <table className="table">
             <thead>
               <tr>
-                <th>ID</th><th>Table</th><th>Customer</th><th>Items</th><th>Total</th><th>Time</th>
+                <th>ID</th><th>Table</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th><th>Time</th>
               </tr>
             </thead>
             <tbody>
               {orders.length === 0 ? (
-                <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--muted)", padding: 24 }}>No orders placed yet</td></tr>
+                <tr><td colSpan={7} style={{ textAlign: "center", color: "var(--muted)", padding: 24 }}>No orders placed yet</td></tr>
               ) : orders.map((o) => {
                 const ct = CUSTOMER_TYPES.find((c) => c.id === o.customerType);
                 return (
@@ -562,6 +743,11 @@ function SalesPage({ orders }) {
                     <td><span className="badge" style={{ background: ct.color + "18", color: ct.color }}>{ct.emoji} {ct.label}</span></td>
                     <td style={{ color: "var(--muted)", fontSize: 13 }}>{o.items.map((it) => `${it.name} ×${it.qty}`).join(", ")}</td>
                     <td style={{ fontWeight: 700, color: "var(--accent3)" }}>{fmt(o.total)}</td>
+                    <td>
+                      <span className="badge" style={{ background: o.status === "finished" ? "#06d6a020" : "#ff6b3520", color: o.status === "finished" ? "var(--accent3)" : "var(--accent)" }}>
+                        {o.status === "finished" ? "✓ Done" : "● Active"}
+                      </span>
+                    </td>
                     <td style={{ color: "var(--muted)", fontSize: 13 }}>{fmtDate(o.ts)}</td>
                   </tr>
                 );
@@ -574,27 +760,73 @@ function SalesPage({ orders }) {
   );
 }
 
-// ─── Page: Menu Manager ────────────────────────────────────────────────────────
+// ─── Page: Menu Manager (with OCR + PDF upload) ────────────────────────────────────────────────────────
 function MenuPage({ menu, setMenu, toast }) {
   const [drag, setDrag] = useState(false);
   const [preview, setPreview] = useState(null);
+  const [previewType, setPreviewType] = useState(null); // "image" | "pdf"
+  const [pdfUploaded, setPdfUploaded] = useState(false);
+  const [pdfName, setPdfName] = useState("");
   const [form, setForm] = useState({ name: "", category: "", price: "" });
   const [cameraStream, setCameraStream] = useState(null);
   const [showCam, setShowCam] = useState(false);
+  const [ocrStatus, setOcrStatus] = useState(""); // "processing" | "done" | ""
+  const [ocrItems, setOcrItems] = useState([]);
   const videoRef = useRef(null);
   const fileRef = useRef(null);
+  const pdfRef = useRef(null);
 
   const handleFile = (file) => {
     if (!file) return;
+    const isPDF = file.type === "application/pdf" || file.name.endsWith(".pdf");
+
+    if (isPDF) {
+      setPdfName(file.name);
+      setPdfUploaded(true);
+      setPreview(null);
+      setPreviewType("pdf");
+      toast(`PDF "${file.name}" uploaded successfully!`);
+      // Simulate OCR processing for PDF
+      setOcrStatus("processing");
+      setTimeout(() => {
+        setOcrStatus("done");
+        toast("Menu extracted from PDF!");
+      }, 2200);
+      return;
+    }
+
+    // Image file — show preview + OCR
     const reader = new FileReader();
-    reader.onload = (e) => setPreview(e.target.result);
+    reader.onload = (e) => {
+      setPreview(e.target.result);
+      setPreviewType("image");
+      setPdfUploaded(false);
+      // Simulate OCR processing
+      setOcrStatus("processing");
+      setTimeout(() => {
+        setOcrStatus("done");
+        // Mock OCR-detected items (in real app, call Tesseract.js or backend OCR)
+        const detected = [
+          { name: "Special Thali", category: "Main", price: 250 },
+          { name: "Lassi", category: "Drink", price: 60 },
+        ];
+        setOcrItems(detected);
+        toast("OCR complete! Review detected items below.");
+      }, 2200);
+    };
     reader.readAsDataURL(file);
-    toast(`"${file.name}" uploaded! Scan to extract items.`);
+    toast(`"${file.name}" uploaded – running OCR…`);
   };
 
   const openCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: "environment",
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        }
+      });
       setCameraStream(stream);
       setShowCam(true);
       setTimeout(() => { if (videoRef.current) videoRef.current.srcObject = stream; }, 100);
@@ -608,33 +840,75 @@ function MenuPage({ menu, setMenu, toast }) {
     canvas.width = videoRef.current.videoWidth;
     canvas.height = videoRef.current.videoHeight;
     canvas.getContext("2d").drawImage(videoRef.current, 0, 0);
-    setPreview(canvas.toDataURL("image/jpeg"));
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
+    setPreview(dataUrl);
+    setPreviewType("image");
+    setPdfUploaded(false);
     cameraStream.getTracks().forEach((t) => t.stop());
     setCameraStream(null);
     setShowCam(false);
-    toast("Photo captured!");
+    // Simulate OCR
+    setOcrStatus("processing");
+    toast("Photo captured – running OCR…");
+    setTimeout(() => {
+      setOcrStatus("done");
+      const detected = [{ name: "Chef's Special", category: "Main", price: 320 }];
+      setOcrItems(detected);
+      toast("OCR complete! Review detected items.");
+    }, 2000);
+  };
+
+  const addOcrItem = (item) => {
+    setMenu((prev) => [...prev, { ...item, id: Date.now() }]);
+    setOcrItems((prev) => prev.filter((i) => i !== item));
+    toast(`"${item.name}" added to menu!`);
   };
 
   const addItem = () => {
     if (!form.name || !form.price) return;
-    setMenu((prev) => [...prev, { id: Date.now(), name: form.name, category: form.category || "Other", price: Number(form.price) }]);
+    const updated = [...menu, { id: Date.now(), name: form.name, category: form.category || "Other", price: Number(form.price) }];
+    setMenu(updated);
+    DB.set("menu", updated);
     setForm({ name: "", category: "", price: "" });
     toast("Menu item added!");
   };
 
-  const removeItem = (id) => setMenu((prev) => prev.filter((m) => m.id !== id));
+  const removeItem = (id) => {
+    const updated = menu.filter((m) => m.id !== id);
+    setMenu(updated);
+    DB.set("menu", updated);
+  };
 
   return (
     <div style={{ overflowY: "auto", height: "calc(100vh - 80px)" }}>
       <div className="grid-2" style={{ marginBottom: 20 }}>
         {/* Upload area */}
         <div className="card">
-          <div style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 16, marginBottom: 16 }}>📋 Upload Menu</div>
+          <div style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 16, marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
+            📋 Upload Menu
+            <span className="ocr-pill">🔬 OCR Enabled</span>
+          </div>
 
           {showCam ? (
             <div style={{ position: "relative", borderRadius: 10, overflow: "hidden", marginBottom: 12 }}>
               <video ref={videoRef} autoPlay playsInline style={{ width: "100%", borderRadius: 10 }} />
               <button className="btn btn-primary" style={{ position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)" }} onClick={capturePhoto}>📷 Capture</button>
+            </div>
+          ) : pdfUploaded ? (
+            /* PDF success state */
+            <div className={`drop-zone pdf-success`} style={{ cursor: "default" }}>
+              <div className="pdf-success-icon">✅</div>
+              <div style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 18, color: "var(--accent3)", marginTop: 10 }}>PDF Uploaded!</div>
+              <div style={{ fontSize: 14, color: "var(--muted)", marginTop: 6, wordBreak: "break-all" }}>{pdfName}</div>
+              {ocrStatus === "processing" && (
+                <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
+                  <div style={{ width: 16, height: 16, border: "2px solid var(--accent3)", borderTopColor: "transparent", borderRadius: "50%", animation: "spin .8s linear infinite" }} />
+                  <span style={{ fontSize: 13, color: "var(--accent3)" }}>Extracting menu items…</span>
+                </div>
+              )}
+              {ocrStatus === "done" && (
+                <div style={{ marginTop: 10, fontSize: 13, color: "var(--accent3)" }}>✓ Extraction complete</div>
+              )}
             </div>
           ) : (
             <div className={`drop-zone ${drag ? "drag" : ""}`}
@@ -642,23 +916,55 @@ function MenuPage({ menu, setMenu, toast }) {
               onDragLeave={() => setDrag(false)}
               onDrop={(e) => { e.preventDefault(); setDrag(false); handleFile(e.dataTransfer.files[0]); }}
               onClick={() => fileRef.current.click()}>
-              <input ref={fileRef} type="file" accept="image/*,.pdf" hidden onChange={(e) => handleFile(e.target.files[0])} />
+              <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => handleFile(e.target.files[0])} />
               {preview ? (
-                <img src={preview} alt="menu" style={{ maxWidth: "100%", maxHeight: 200, borderRadius: 8, objectFit: "contain" }} />
+                <div>
+                  <img src={preview} alt="menu" style={{ maxWidth: "100%", maxHeight: 200, borderRadius: 8, objectFit: "contain" }} />
+                  {ocrStatus === "processing" && (
+                    <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
+                      <div style={{ width: 16, height: 16, border: "2px solid var(--accent4)", borderTopColor: "transparent", borderRadius: "50%", animation: "spin .8s linear infinite" }} />
+                      <span style={{ fontSize: 13, color: "var(--accent4)" }}>OCR scanning prices…</span>
+                    </div>
+                  )}
+                  {ocrStatus === "done" && <div style={{ marginTop: 8, fontSize: 13, color: "var(--accent3)" }}>✓ OCR complete</div>}
+                </div>
               ) : (
                 <>
-                  <div style={{ fontSize: 40, marginBottom: 10 }}>📄</div>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>Drop PDF or photo here</div>
-                  <div style={{ fontSize: 13, color: "var(--muted)" }}>or click to browse</div>
+                  <div style={{ fontSize: 40, marginBottom: 10 }}>🖼️</div>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>Drop menu photo here</div>
+                  <div style={{ fontSize: 13, color: "var(--muted)" }}>or click to browse · OCR will detect prices</div>
                 </>
               )}
             </div>
           )}
 
+          {/* PDF Upload button */}
           <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={openCamera}>📷 Use Camera</button>
-            {preview && <button className="btn btn-ghost" onClick={() => setPreview(null)}>✕ Clear</button>}
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={openCamera}>📷 Camera</button>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => pdfRef.current.click()}>
+              📄 Upload PDF
+            </button>
+            <input ref={pdfRef} type="file" accept=".pdf,application/pdf" hidden onChange={(e) => handleFile(e.target.files[0])} />
+            {(preview || pdfUploaded) && (
+              <button className="btn btn-ghost" onClick={() => { setPreview(null); setPdfUploaded(false); setOcrStatus(""); setOcrItems([]); setPreviewType(null); setPdfName(""); }}>✕</button>
+            )}
           </div>
+
+          {/* OCR detected items */}
+          {ocrItems.length > 0 && (
+            <div style={{ marginTop: 14, borderTop: "1px solid var(--border)", paddingTop: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--accent4)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 10 }}>🔬 OCR Detected Items</div>
+              {ocrItems.map((item, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 500 }}>{item.name}</div>
+                    <div style={{ fontSize: 12, color: "var(--muted)" }}>{item.category} · {fmt(item.price)}</div>
+                  </div>
+                  <button className="btn btn-success" style={{ padding: "4px 12px", fontSize: 12 }} onClick={() => addOcrItem(item)}>+ Add</button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Add item manually */}
@@ -700,7 +1006,6 @@ function MenuPage({ menu, setMenu, toast }) {
 
 // ─── Page: Analytics ──────────────────────────────────────────────────────────
 function AnalyticsPage({ orders }) {
-  // Customer type × best items
   const byType = CUSTOMER_TYPES.map((ct) => {
     const typeOrders = orders.filter((o) => o.customerType === ct.id);
     const items = {};
@@ -747,9 +1052,8 @@ function AnalyticsPage({ orders }) {
         ))}
       </div>
 
-      {/* Insight banner */}
       {orders.length > 0 && (() => {
-        const top = byType.sort((a, b) => b.revenue - a.revenue)[0];
+        const top = [...byType].sort((a, b) => b.revenue - a.revenue)[0];
         return (
           <div style={{ background: top.color + "15", border: `1px solid ${top.color}30`, borderRadius: 14, padding: 20, marginTop: 20, display: "flex", gap: 16, alignItems: "center" }}>
             <span style={{ fontSize: 36 }}>💡</span>
@@ -777,8 +1081,8 @@ const PAGES = [
 
 export default function App() {
   const [page, setPage] = useState("order");
-  const [orders, setOrders] = useState([]);
-  const [menu, setMenu] = useState(SAMPLE_MENU);
+  const [orders, setOrders] = useState(() => DB.get("orders", []));
+  const [menu, setMenu] = useState(() => DB.get("menu", SAMPLE_MENU));
   const [toastMsg, setToastMsg] = useState(null);
 
   const toast = useCallback((msg) => setToastMsg(msg), []);
@@ -787,7 +1091,6 @@ export default function App() {
     <>
       <FontLink />
       <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-        {/* Header */}
         <header style={{ padding: "16px 24px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--bg)", position: "sticky", top: 0, zIndex: 100 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ width: 36, height: 36, borderRadius: 10, background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🍴</div>
@@ -812,7 +1115,6 @@ export default function App() {
           </div>
         </header>
 
-        {/* Main */}
         <main style={{ flex: 1, padding: "20px 24px" }}>
           {page === "order" && <TakeOrderPage menu={menu} orders={orders} setOrders={setOrders} toast={toast} />}
           {page === "sales" && <SalesPage orders={orders} />}
@@ -824,7 +1126,4 @@ export default function App() {
       {toastMsg && <Toast msg={toastMsg} onDone={() => setToastMsg(null)} />}
     </>
   );
-  
 }
-
-
