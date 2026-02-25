@@ -1031,85 +1031,102 @@ function loadTesseract() {
   });
 }
 
-// ─── Preprocess image for OCR ─────────────────────────────────────────────────
-// Pipeline: upscale → grayscale → adaptive threshold (Sauvola) → unsharp mask
+// ─── Image preprocessor — returns TWO versions for Tesseract ─────────────────
+// Version A: grayscale + contrast stretch + unsharp mask  (best for clean/bright menus)
+// Version B: grayscale + CLAHE-style local equalisation   (best for dark/uneven menus)
+// Tesseract runs on both; results are merged — best of both worlds.
 function preprocessImageForOCR(imageSrc) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
-      // 1. Upscale to ~2400px wide (≈300dpi) — Tesseract optimal range
+      // ── Step 1: upscale to 2400px wide (Tesseract sweet spot ~300dpi) ──────
       const scale = Math.max(1, Math.min(4, 2400 / img.width));
       const w = Math.round(img.width  * scale);
       const h = Math.round(img.height * scale);
 
-      const canvas = document.createElement("canvas");
-      canvas.width = w; canvas.height = h;
-      const ctx = canvas.getContext("2d");
+      const cv = document.createElement("canvas");
+      cv.width = w; cv.height = h;
+      const ctx = cv.getContext("2d");
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = "high";
       ctx.drawImage(img, 0, 0, w, h);
 
-      const imageData = ctx.getImageData(0, 0, w, h);
-      const d = imageData.data;
+      const id = ctx.getImageData(0, 0, w, h);
+      const d  = id.data;
+
+      // ── Step 2: grayscale (luminance-accurate) ────────────────────────────
       const gray = new Uint8Array(w * h);
-
-      // 2. Grayscale
       for (let i = 0; i < d.length; i += 4) {
-        gray[i >> 2] = Math.round(0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2]);
+        gray[i >> 2] = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
       }
 
-      // 3. Adaptive threshold — Sauvola method with 31×31 window
-      //    Handles uneven lighting, dark/coloured backgrounds, glare on laminated menus
-      const k = 0.34, R = 128;
-      const wh = 15; // half-window = 15 → full window = 31px
-      const out = new Uint8Array(w * h);
+      // ── Version A: global contrast stretch + gentle unsharp mask ─────────
+      // Finds the 2nd / 98th percentile (robust to extreme pixels) then remaps.
+      const sorted = gray.slice().sort();
+      const lo = sorted[Math.floor(sorted.length * 0.02)];
+      const hi = sorted[Math.floor(sorted.length * 0.98)];
+      const range = Math.max(1, hi - lo);
 
-      // Integral image for O(1) mean & variance per window
-      const intg  = new Float64Array((w+1)*(h+1));
-      const intg2 = new Float64Array((w+1)*(h+1));
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          const v = gray[y*w+x];
-          intg [(y+1)*(w+1)+(x+1)] = v   + intg [y*(w+1)+(x+1)] + intg [(y+1)*(w+1)+x] - intg [y*(w+1)+x];
-          intg2[(y+1)*(w+1)+(x+1)] = v*v + intg2[y*(w+1)+(x+1)] + intg2[(y+1)*(w+1)+x] - intg2[y*(w+1)+x];
-        }
-      }
-      for (let y = 0; y < h; y++) {
-        const y1 = Math.max(0,y-wh), y2 = Math.min(h-1,y+wh);
-        for (let x = 0; x < w; x++) {
-          const x1 = Math.max(0,x-wh), x2 = Math.min(w-1,x+wh);
-          const n  = (x2-x1+1)*(y2-y1+1);
-          const s  = intg [(y2+1)*(w+1)+(x2+1)] - intg [y1*(w+1)+(x2+1)] - intg [(y2+1)*(w+1)+x1] + intg [y1*(w+1)+x1];
-          const s2 = intg2[(y2+1)*(w+1)+(x2+1)] - intg2[y1*(w+1)+(x2+1)] - intg2[(y2+1)*(w+1)+x1] + intg2[y1*(w+1)+x1];
-          const mean = s/n;
-          const std  = Math.sqrt(Math.max(0, s2/n - mean*mean));
-          out[y*w+x] = gray[y*w+x] >= mean*(1+k*(std/R-1)) ? 255 : 0;
-        }
+      const grayA = new Uint8Array(w * h);
+      for (let i = 0; i < gray.length; i++) {
+        // Remap + S-curve for extra contrast punch
+        const v = Math.min(255, Math.max(0, ((gray[i] - lo) / range) * 255));
+        grayA[i] = v < 128
+          ? (2 * v * v) / 255
+          : 255 - (2 * (255 - v) * (255 - v)) / 255;
       }
 
-      // 4. Write binarised image back (black text / white bg)
-      for (let i = 0; i < out.length; i++) {
-        d[i*4] = d[i*4+1] = d[i*4+2] = out[i]; d[i*4+3] = 255;
-      }
-
-      // 5. Laplacian sharpening to recover thin strokes
-      const pre = new Uint8ClampedArray(d);
+      // Unsharp mask on Version A (only on greyscale, not binary — safe)
+      const sharpA = new Uint8Array(w * h);
       for (let y = 1; y < h-1; y++) {
         for (let x = 1; x < w-1; x++) {
-          const idx = (y*w+x)*4;
+          const i = y*w+x;
+          // 5-tap high-pass kernel
           const v = Math.min(255, Math.max(0,
-            -pre[((y-1)*w+x)*4] - pre[(y*w+x-1)*4] +
-             5*pre[idx] -
-             pre[(y*w+x+1)*4] - pre[((y+1)*w+x)*4]
+            5 * grayA[i]
+            - grayA[(y-1)*w+x] - grayA[(y+1)*w+x]
+            - grayA[y*w+x-1]   - grayA[y*w+x+1]
           ));
-          d[idx] = d[idx+1] = d[idx+2] = v;
+          sharpA[i] = v;
         }
       }
+      // Copy borders from grayA
+      for (let x = 0; x < w; x++) { sharpA[x] = grayA[x]; sharpA[(h-1)*w+x] = grayA[(h-1)*w+x]; }
+      for (let y = 0; y < h; y++) { sharpA[y*w] = grayA[y*w]; sharpA[y*w+w-1] = grayA[y*w+w-1]; }
 
-      ctx.putImageData(imageData, 0, 0);
-      resolve(canvas.toDataURL("image/png"));
+      // Write Version A into the canvas → export PNG
+      for (let i = 0; i < sharpA.length; i++) {
+        d[i*4] = d[i*4+1] = d[i*4+2] = sharpA[i]; d[i*4+3] = 255;
+      }
+      ctx.putImageData(id, 0, 0);
+      const dataA = cv.toDataURL("image/png");
+
+      // ── Version B: 64-bin histogram equalisation (CLAHE-lite) ────────────
+      // Dramatically improves dark backgrounds (like your black menu card).
+      const hist = new Int32Array(256);
+      for (let i = 0; i < gray.length; i++) hist[gray[i]]++;
+      const cdf = new Float32Array(256);
+      cdf[0] = hist[0];
+      for (let i = 1; i < 256; i++) cdf[i] = cdf[i-1] + hist[i];
+      const cdfMin = cdf.find(v => v > 0) || 0;
+      const pxTotal = w * h;
+      const lut = new Uint8Array(256);
+      for (let i = 0; i < 256; i++) {
+        lut[i] = Math.round(((cdf[i] - cdfMin) / (pxTotal - cdfMin)) * 255);
+      }
+      const grayB = new Uint8Array(w * h);
+      for (let i = 0; i < gray.length; i++) grayB[i] = lut[gray[i]];
+
+      for (let i = 0; i < grayB.length; i++) {
+        d[i*4] = d[i*4+1] = d[i*4+2] = grayB[i]; d[i*4+3] = 255;
+      }
+      ctx.putImageData(id, 0, 0);
+      const dataB = cv.toDataURL("image/png");
+
+      // Resolve with both versions
+      resolve({ a: dataA, b: dataB });
     };
-    img.onerror = () => resolve(imageSrc);
+    img.onerror = () => resolve({ a: imageSrc, b: imageSrc });
     img.src = imageSrc;
   });
 }
@@ -1263,59 +1280,61 @@ function MenuPage({ menu, setMenu, toast }) {
     // Strip stray pipe/underscores between words
     .replace(/([a-zA-Z])\s*[|_]\s*([a-zA-Z])/g, "$1 $2");
 
-  // ── 3-pass Tesseract OCR ────────────────────────────────────────────────────
+  // ── 4-pass Tesseract OCR across two preprocessed image versions ─────────────
   const runOCR = async (id, imageSrc) => {
     await loadTesseract();
     const { createWorker } = window.Tesseract;
 
-    let processedSrc;
-    try { processedSrc = await preprocessImageForOCR(imageSrc); }
-    catch { processedSrc = imageSrc; }
+    // Get both preprocessed versions
+    let srcA = imageSrc, srcB = imageSrc;
+    try {
+      const result = await preprocessImageForOCR(imageSrc);
+      srcA = result.a;  // contrast-stretch + unsharp  (bright/clean menus)
+      srcB = result.b;  // histogram equalisation       (dark/uneven menus)
+    } catch { /* fallback: use original */ }
 
     const worker = await createWorker("eng", 1, { logger: () => {} });
-
-    // Common params for all passes
     const baseParams = {
       tessedit_char_whitelist:
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789₹/-.,()'& ",
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789\u20b9/-.,()\'& ",
       preserve_interword_spaces: "1",
-      // Tell Tesseract to treat / and - as ordinary chars (not line-end hyphens)
-      tessedit_preserve_blkword_pos: "0",
     };
 
-    let texts = [];
+    const texts = [];
     try {
-      // Pass 1 – PSM 4: single column, variable text sizes (best for card-style menus)
-      await worker.setParameters({ ...baseParams, tessedit_pageseg_mode: "4" });
-      texts.push((await worker.recognize(processedSrc)).data.text);
-
-      // Pass 2 – PSM 6: uniform block (best for grid/table menus)
+      // Pass 1 — PSM 6 on srcA: uniform block, contrast-stretched
       await worker.setParameters({ ...baseParams, tessedit_pageseg_mode: "6" });
-      texts.push((await worker.recognize(processedSrc)).data.text);
+      texts.push((await worker.recognize(srcA)).data.text);
 
-      // Pass 3 – PSM 11: sparse text, no OSD — catches items in fancy/decorative fonts
+      // Pass 2 — PSM 6 on srcB: same layout, histogram-equalised (dark menus)
+      texts.push((await worker.recognize(srcB)).data.text);
+
+      // Pass 3 — PSM 4 on srcA: single column, variable sizes
+      await worker.setParameters({ ...baseParams, tessedit_pageseg_mode: "4" });
+      texts.push((await worker.recognize(srcA)).data.text);
+
+      // Pass 4 — PSM 11 on srcB: sparse text, catches decorative fonts
       await worker.setParameters({ ...baseParams, tessedit_pageseg_mode: "11" });
-      texts.push((await worker.recognize(processedSrc)).data.text);
+      texts.push((await worker.recognize(srcB)).data.text);
     } catch {
-      toast("OCR failed — try a clearer photo with good lighting");
+      toast("OCR failed — try better lighting or a flatter photo");
     } finally {
       await worker.terminate();
     }
 
-    // Apply domain corrections to all passes
-    texts = texts.map(fixOcrText);
+    const fixed = texts.map(fixOcrText).filter(Boolean);
+    const countPrices = (t) =>
+      (t.match(/\d{2,4}\s*\/-/g) || []).length * 2 + (t.match(/\d{2,4}/g) || []).length;
+    fixed.sort((a, b) => countPrices(b) - countPrices(a));
+    const primary  = fixed[0] || "";
+    const combined = fixed.join("\n");
 
-    // Pick the pass with the most price hits as primary display text
-    const countPrices = (t) => (t.match(/\d{2,4}\s*\/-/g)||[]).length * 2 + (t.match(/\d{2,4}/g)||[]).length;
-    texts.sort((a, b) => countPrices(b) - countPrices(a));
-    const primary  = texts[0] || "";
-    const combined = texts.join("\n");
-
-    setMediaItems(prev => prev.map(m => m.id === id ? { ...m, ocrDone: true, rawText: primary } : m));
+    setMediaItems(prev => prev.map(m =>
+      m.id === id ? { ...m, ocrDone: true, rawText: primary } : m
+    ));
     setOcrRawText(prev => prev + (prev ? "\n\n--- new scan ---\n\n" : "") + primary);
 
     const parsed = parseMenuText(combined);
-
     if (parsed.length === 0) {
       toast("No items found — check lighting, avoid glare, keep menu flat");
     } else {
@@ -1327,7 +1346,7 @@ function MenuPage({ menu, setMenu, toast }) {
     }
   };
 
-  const addMedia = (type, src, name) => {
+    const addMedia = (type, src, name) => {
     const id = generateId();
     setMediaItems(prev => [...prev, { id, type, src, name, ocrDone:false, ts:Date.now() }]);
     if (type === "image" && src) runOCR(id, src);
