@@ -392,127 +392,192 @@ function TakeOrderPage({ menu, orders, setOrders, toast }) {
     toast("Order updated!");
   };
 
-  // ── Enhanced Voice ────────────────────────────────────────────────────────
+  // ── Detect if running on a mobile/Android device ─────────────────────────
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    typeof navigator !== "undefined" ? navigator.userAgent : ""
+  );
+  const isAndroid = /Android/i.test(typeof navigator !== "undefined" ? navigator.userAgent : "");
+
+  // ── Stop mic cleanly ──────────────────────────────────────────────────────
   const stopMic = useCallback(() => {
     activeRef.current = false;
-    recognitionRef.current?.stop();
+    try { recognitionRef.current?.abort(); } catch {}
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    if (audioCtxRef.current) { audioCtxRef.current.close(); audioCtxRef.current = null; }
+    if (audioCtxRef.current) {
+      try { audioCtxRef.current.close(); } catch {}
+      audioCtxRef.current = null;
+    }
     analyserRef.current = null;
-    setIsRecording(false); setNoiseLevel(0); setInterimText(""); addedRef.current.clear();
+    setIsRecording(false);
+    setNoiseLevel(0);
+    setInterimText("");
+    addedRef.current.clear();
   }, []);
 
+  // ── Core recognition logic (shared between mobile & desktop) ─────────────
+  const buildAndStartRec = useCallback((onResult) => {
+    if (!activeRef.current) return;
+    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const rec = new Rec();
+
+    // Android Chrome does NOT reliably support continuous=true
+    // Setting it false + auto-restarting onend is the only reliable pattern
+    rec.continuous     = !isAndroid; // false on Android, true on desktop
+    rec.interimResults = true;
+    rec.lang           = "en-IN";
+    rec.maxAlternatives = 5;
+
+    rec.onresult = onResult;
+
+    rec.onerror = (ev) => {
+      // These are non-fatal on Android — it stops and restarts frequently
+      if (["no-speech", "aborted", "audio-capture"].includes(ev.error)) return;
+      // network error = speech recognition server unreachable
+      if (ev.error === "network") {
+        setMicError("Network error — check your internet connection");
+        stopMic();
+        return;
+      }
+      // not-allowed = user denied mic permission
+      if (ev.error === "not-allowed") {
+        setMicError("Microphone permission denied — allow mic in browser settings");
+        stopMic();
+        return;
+      }
+      setMicError(`Voice error: ${ev.error}`);
+    };
+
+    // onend fires very frequently on Android — restart quickly but not instantly
+    // (too fast = Android bans you; too slow = noticeable gap)
+    rec.onend = () => {
+      if (!activeRef.current) return;
+      const delay = isAndroid ? 300 : 150;
+      setTimeout(() => buildAndStartRec(onResult), delay);
+    };
+
+    try {
+      rec.start();
+      recognitionRef.current = rec;
+    } catch (e) {
+      // InvalidStateError = already started, just wait for onend restart
+    }
+  }, [isAndroid, stopMic]);
+
   const toggleMic = async () => {
-    if (!("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
-      toast("Use Chrome or Edge for voice support"); return;
+    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRec) {
+      setMicError("Voice not supported — use Chrome on Android or Chrome/Edge on desktop");
+      toast("Use Chrome on Android for voice support");
+      return;
     }
     if (isRecording) { stopMic(); return; }
 
     setMicError(""); setMicMatches([]);
-
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation:  { ideal: true },
-          noiseSuppression:  { ideal: true },
-          autoGainControl:   { ideal: true },
-          channelCount: 1,
-          sampleRate: { ideal: 48000 },
-        },
-      });
-    } catch { toast("Microphone access denied"); return; }
-
-    // Web Audio — high-pass filter + analyser
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const src = ctx.createMediaStreamSource(stream);
-    const hp  = ctx.createBiquadFilter();
-    hp.type = "highpass"; hp.frequency.value = 180; hp.Q.value = 0.7;
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.8;
-    src.connect(hp); hp.connect(analyser);
-    audioCtxRef.current = ctx; analyserRef.current = analyser;
-
-    const freqData = new Uint8Array(analyser.frequencyBinCount);
-    const tick = () => {
-      if (!analyserRef.current) return;
-      analyserRef.current.getByteFrequencyData(freqData);
-      const speechSlice = freqData.slice(3, 40);
-      const avg = speechSlice.reduce((a, b) => a + b, 0) / speechSlice.length;
-      setNoiseLevel(Math.min(100, avg * 2.6));
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    tick();
-
     activeRef.current = true;
-    setIsRecording(true); setTranscript("");
+    setIsRecording(true);
+    setTranscript("");
 
-    // Restart-on-end pattern: browser kills recognition after ~60s of silence
-    const startRec = () => {
-      if (!activeRef.current) return;
-      const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
-      const rec = new Rec();
-      rec.continuous     = true;
-      rec.interimResults = true;
-      rec.lang           = "en-IN";
-      rec.maxAlternatives = 5; // analyse top-5 hypotheses for accuracy
+    // ── On MOBILE: skip getUserMedia entirely — it blocks SpeechRecognition ──
+    // SpeechRecognition handles its own mic access internally on Android Chrome
+    if (isMobile) {
+      // Fake animated visualizer — just pulses while speaking
+      // (no real audio data without getUserMedia, but bars still animate via CSS)
+      const fakeViz = () => {
+        if (!activeRef.current) return;
+        setNoiseLevel(prev => {
+          // Gentle random walk so bars look alive
+          const next = prev + (Math.random() - 0.45) * 25;
+          return Math.max(10, Math.min(90, next));
+        });
+        rafRef.current = requestAnimationFrame(fakeViz);
+      };
+      fakeViz();
 
-      rec.onresult = (e) => {
-        let finals = ""; let interim = "";
-        for (let i = e.resultIndex; i < e.results.length; i++) {
-          const res  = e.results[i];
-          // Build array of all alternative transcripts for this result
-          const alts = Array.from({ length: res.length }, (_, k) => res[k].transcript);
+    } else {
+      // ── On DESKTOP: use getUserMedia for real noise-level visualizer ─────
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: { ideal: true },
+            noiseSuppression: { ideal: true },
+            autoGainControl:  { ideal: true },
+            channelCount: 1,
+            sampleRate: { ideal: 48000 },
+          },
+        });
+      } catch {
+        // Mic permission denied on desktop — still try SpeechRecognition alone
+        toast("Mic permission denied — voice may still work via browser prompt");
+      }
 
-          if (res.isFinal) {
-            finals += res[0].transcript + " ";
+      if (stream) {
+        const ctx     = new (window.AudioContext || window.webkitAudioContext)();
+        const src     = ctx.createMediaStreamSource(stream);
+        const hp      = ctx.createBiquadFilter();
+        hp.type = "highpass"; hp.frequency.value = 180; hp.Q.value = 0.7;
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.8;
+        src.connect(hp); hp.connect(analyser);
+        audioCtxRef.current = ctx;
+        analyserRef.current = analyser;
 
-            // ── Item detection across ALL alternatives (much higher recall) ──
-            const newlyAdded = [];
-            menu.forEach(item => {
-              if (addedRef.current.has(item.id)) return;
-              const best = Math.max(...alts.map(a => matchScore(item.name, a)));
-              if (best >= 0.75) {
-                // Detect quantity from any alternative
-                let qty = 1;
-                alts.forEach(a => {
-                  const m = a.toLowerCase().match(/(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+/);
-                  if (m) { const q = m[1]; qty = isNaN(q) ? (NUM_WORDS[q]||1) : parseInt(q); }
-                });
-                qty = Math.min(qty, 10);
-                for (let q = 0; q < qty; q++) addItem(item);
-                addedRef.current.add(item.id);
-                newlyAdded.push(`${item.name}${qty > 1 ? ` ×${qty}` : ""}`);
-              }
-            });
-            if (newlyAdded.length) setMicMatches(prev => [...prev.slice(-4), ...newlyAdded]);
+        const freqData = new Uint8Array(analyser.frequencyBinCount);
+        const tick = () => {
+          if (!analyserRef.current) return;
+          analyserRef.current.getByteFrequencyData(freqData);
+          const avg = freqData.slice(3, 40).reduce((a, b) => a + b, 0) / 37;
+          setNoiseLevel(Math.min(100, avg * 2.6));
+          rafRef.current = requestAnimationFrame(tick);
+        };
+        tick();
+      }
+    }
 
-            // Table detection
-            alts.forEach(a => {
-              const tm = a.toLowerCase().match(/table\s+(?:number\s+)?([a-z0-9-]+)/i);
-              if (tm) setTableNum(tm[1].toUpperCase());
-            });
+    // ── Shared result handler ─────────────────────────────────────────────
+    const handleResult = (e) => {
+      let finals = ""; let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const res  = e.results[i];
+        const alts = Array.from({ length: res.length }, (_, k) => res[k].transcript);
 
-          } else {
-            interim += res[0].transcript;
-          }
+        if (res.isFinal) {
+          finals += res[0].transcript + " ";
+
+          // Match menu items across all alternatives
+          const newlyAdded = [];
+          menu.forEach(item => {
+            if (addedRef.current.has(item.id)) return;
+            const best = Math.max(...alts.map(a => matchScore(item.name, a)));
+            if (best >= 0.75) {
+              let qty = 1;
+              alts.forEach(a => {
+                const m = a.toLowerCase().match(/(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+/);
+                if (m) { const q = m[1]; qty = isNaN(q) ? (NUM_WORDS[q] || 1) : parseInt(q); }
+              });
+              qty = Math.min(qty, 10);
+              for (let q = 0; q < qty; q++) addItem(item);
+              addedRef.current.add(item.id);
+              newlyAdded.push(`${item.name}${qty > 1 ? ` ×${qty}` : ""}`);
+            }
+          });
+          if (newlyAdded.length) setMicMatches(prev => [...prev.slice(-4), ...newlyAdded]);
+
+          // Table number detection
+          alts.forEach(a => {
+            const tm = a.toLowerCase().match(/table\s+(?:number\s+)?([a-z0-9-]+)/i);
+            if (tm) setTableNum(tm[1].toUpperCase());
+          });
+
+        } else {
+          interim += res[0].transcript;
         }
-        if (finals) setTranscript(prev => (prev + finals).slice(-300));
-        setInterimText(interim);
-      };
-
-      rec.onerror = ev => {
-        if (ev.error === "no-speech" || ev.error === "aborted") return;
-        setMicError(`Mic error: ${ev.error}`);
-      };
-      rec.onend = () => { if (activeRef.current) setTimeout(startRec, 150); };
-      rec.start();
-      recognitionRef.current = rec;
+      }
+      if (finals) setTranscript(prev => (prev + finals).slice(-300));
+      setInterimText(interim);
     };
 
-    startRec();
-    // Store cleanup for unmount
-    return () => { stream.getTracks().forEach(t => t.stop()); };
+    buildAndStartRec(handleResult);
   };
 
   const categories = [...new Set(menu.map(m => m.category))];
@@ -551,39 +616,92 @@ function TakeOrderPage({ menu, orders, setOrders, toast }) {
           <div style={{ display:"flex", gap:14, marginBottom:16, alignItems:"flex-start" }}>
             <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:8 }}>
               <button className={`mic-btn ${isRecording ? "recording" : "idle"}`} onClick={toggleMic}
-                title={isRecording ? "Stop" : "Voice order — noise cancelling + fuzzy match"}>
+                title={isRecording ? "Tap to stop" : "Tap to start voice order"}>
                 {isRecording ? "⏹" : "🎙️"}
               </button>
+              {/* Waveform bars — real audio data on desktop, animated on mobile */}
               {isRecording && (
                 <div style={{ display:"flex", gap:3, alignItems:"center", height:22 }}>
                   {[...Array(7)].map((_, i) => (
-                    <div key={i} className="wave-bar" style={{ height:`${10 + (noiseLevel/100)*14}px`, animationDelay:`${i*0.09}s`, opacity: noiseLevel > 4 ? 1 : 0.3 }} />
+                    <div key={i} className={isMobile ? "wave-bar" : "wave-bar"}
+                      style={{
+                        height: isMobile
+                          ? `${12 + Math.sin(i * 0.9) * 6}px`        // static pattern on mobile
+                          : `${10 + (noiseLevel/100)*14}px`,          // real level on desktop
+                        animationDelay:`${i*0.09}s`,
+                        opacity: isRecording ? 1 : 0.3,
+                        background: "var(--accent)",
+                        width: 3,
+                        borderRadius: 2,
+                        animation: "waveBar .7s ease-in-out infinite",
+                        animationDelay: `${i * 0.1}s`,
+                      }}
+                    />
                   ))}
                 </div>
               )}
-              {isRecording && <span style={{ fontSize:10, color:"var(--accent3)", textAlign:"center", lineHeight:1.3 }}>🔇 Noise<br/>Filter</span>}
+              {/* Show mic mode label */}
+              {!isRecording && (
+                <span style={{ fontSize:10, color:"var(--muted)", textAlign:"center", lineHeight:1.3 }}>
+                  {isAndroid ? "Android\nChrome" : "Voice"}
+                </span>
+              )}
             </div>
 
             <div style={{ flex:1 }}>
               <input className="input" placeholder="Search menu…" value={search} onChange={e => setSearch(e.target.value)} />
+
+              {/* Recording panel */}
               {isRecording && (
                 <div style={{ marginTop:8, padding:"10px 14px", background:"var(--surface2)", borderRadius:10, border:"1px solid #ff6b3530" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
                     <div className="rec-dot" />
-                    <span style={{ fontSize:12, color:"var(--accent)", fontWeight:600 }}>Listening — speak item names clearly</span>
+                    <span style={{ fontSize:12, color:"var(--accent)", fontWeight:600 }}>
+                      {isMobile ? "Listening… speak item names" : "Listening — noise filter active"}
+                    </span>
                   </div>
-                  {interimText && <div style={{ fontSize:12, color:"var(--muted)", fontStyle:"italic", marginBottom:6 }}>"{interimText}"</div>}
+                  {interimText && (
+                    <div style={{ fontSize:12, color:"var(--muted)", fontStyle:"italic", marginBottom:6 }}>
+                      "{interimText}"
+                    </div>
+                  )}
                   {micMatches.length > 0 && (
                     <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
                       {micMatches.map((m, i) => (
-                        <span key={i} style={{ background:"#06d6a020", color:"var(--accent3)", borderRadius:100, padding:"2px 10px", fontSize:12, border:"1px solid #06d6a030" }}>✓ {m}</span>
+                        <span key={i} style={{ background:"#06d6a020", color:"var(--accent3)", borderRadius:100, padding:"2px 10px", fontSize:12, border:"1px solid #06d6a030" }}>
+                          ✓ {m}
+                        </span>
                       ))}
                     </div>
                   )}
                 </div>
               )}
-              {transcript && !isRecording && <div style={{ marginTop:6, fontSize:12, color:"var(--muted)" }}>Last session: "{transcript.slice(-80)}"</div>}
-              {micError && <div style={{ fontSize:12, color:"var(--danger)", marginTop:6 }}>⚠ {micError}</div>}
+
+              {transcript && !isRecording && (
+                <div style={{ marginTop:6, fontSize:12, color:"var(--muted)" }}>
+                  Last: "{transcript.slice(-80)}"
+                </div>
+              )}
+
+              {/* Error message — with actionable fix instructions */}
+              {micError && (
+                <div style={{ marginTop:8, padding:"10px 14px", background:"#1f1020", borderRadius:10, border:"1px solid #ef444430" }}>
+                  <div style={{ fontSize:12, color:"var(--danger)", fontWeight:600, marginBottom:4 }}>⚠ {micError}</div>
+                  {micError.includes("not-allowed") || micError.includes("denied") ? (
+                    <div style={{ fontSize:11, color:"var(--muted)", lineHeight:1.6 }}>
+                      <strong>Android fix:</strong> Open Chrome → tap the 🔒 lock icon in address bar → tap Permissions → enable Microphone → refresh the page.
+                    </div>
+                  ) : micError.includes("supported") ? (
+                    <div style={{ fontSize:11, color:"var(--muted)", lineHeight:1.6 }}>
+                      Please open this app in <strong>Google Chrome</strong> on Android for voice support.
+                    </div>
+                  ) : micError.includes("network") ? (
+                    <div style={{ fontSize:11, color:"var(--muted)", lineHeight:1.6 }}>
+                      Voice needs an internet connection to process speech. Check your WiFi/data.
+                    </div>
+                  ) : null}
+                </div>
+              )}
             </div>
           </div>
 
