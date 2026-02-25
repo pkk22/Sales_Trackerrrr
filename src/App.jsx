@@ -109,51 +109,88 @@ const generateId = () => Math.random().toString(36).slice(2,9);
 const fmt      = (n) => `₹${n.toLocaleString("en-IN")}`;
 const fmtDate  = (d) => new Date(d).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
 
-// ─── Voice matching — STRICT per-word scoring ────────────────────────────────
-// Problem: "Paneer Fried Momo" was matching "Paneer Steam Momo" because
-// they share "Paneer" and "Momo" (2/3 words). Fix: require ALL distinctive
-// words to match, not just a fraction.
+// ─── Voice matching — Soundex + Edit-distance hybrid ────────────────────────
+// Restores the original far-field tolerant system (soundex catches "paner"→"paneer",
+// "steem"→"steam", "weg"→"veg" etc.) PLUS adds a confusion guard that prevents
+// "Paneer Fried Momo" from matching when the user said "Paneer Steam Momo".
+//
+// How the guard works: for every clearly-recognisable spoken word (wms > 0.82),
+// find which menu item's DISTINCTIVE word it best matches. If that word belongs
+// to a different item (not this one), the match is rejected.
+// "Distinctive" = appears in fewer than half the menu items (so "momo"/"burger"
+// are NOT distinctive and are ignored by the guard).
 
-function editDist(a, b) {
+function soundex(s) {
+  return s.toLowerCase()
+    .replace(/[aeiou]/g, "")
+    .replace(/[bfpv]/g, "1").replace(/[cgjkqsxyz]/g, "2")
+    .replace(/[dt]/g, "3").replace(/l/g, "4").replace(/[mn]/g, "5").replace(/r/g, "6")
+    .replace(/(.)\1+/g, "$1");
+}
+
+function editSim(a, b) {
   const m = a.length, n = b.length;
-  if (!m || !n) return Math.max(m, n);
+  if (!m || !n) return 0;
   const dp = Array.from({length:m+1}, (_,i) => Array.from({length:n+1}, (_,j) => i||j));
   for (let i=1;i<=m;i++) for (let j=1;j<=n;j++)
     dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1] : 1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
-  return dp[m][n];
+  return 1 - dp[m][n] / Math.max(m, n);
 }
 
-function wordSim(a, b) {
-  // 0–1 similarity between two single words
-  if (a === b) return 1;
-  if (a.includes(b) || b.includes(a)) return 0.9;
-  const dist = editDist(a, b);
-  return Math.max(0, 1 - dist / Math.max(a.length, b.length));
+// Per-word similarity: edit distance + soundex phonetic bonus
+function wms(a, b) {
+  return Math.max(editSim(a, b), soundex(a) === soundex(b) ? 0.82 : 0);
 }
 
-// Returns 0–1: how well `spokenText` matches `itemName`
-// Uses strict ALL-words-must-match logic to prevent partial-word false positives
-function voiceMatchScore(itemName, spokenText) {
-  const nameWords  = itemName.toLowerCase().split(/\s+/);
-  const spokenWords = spokenText.toLowerCase().split(/\s+/);
+// Returns 0–1 confidence that itemName matches the spoken string.
+// Pass allItemNames (array of all menu item names) to enable the confusion guard.
+function matchScore(itemName, spoken, allItemNames) {
+  const name = itemName.toLowerCase();
+  const sp   = spoken.toLowerCase();
+  if (sp.includes(name)) return 1.0;
 
-  // Quick exact substring check
-  if (spokenText.toLowerCase().includes(itemName.toLowerCase())) return 1.0;
+  const nameWords = name.split(" ");
+  const spWords   = sp.split(/\s+/);
 
-  // For each word in the item name, find the best matching spoken word
-  const wordScores = nameWords.map(nw => {
-    return Math.max(...spokenWords.map(sw => wordSim(nw, sw)));
+  // ── Original scoring: each name-word looks for its best spoken-word match ──
+  // Hit threshold 0.65 (down from original 0.72) to tolerate far-field garbling
+  // like "weg"→"veg" (editSim=0.67, soundex differs) or "fred"→"fried"
+  let hits = 0;
+  nameWords.forEach(nw => {
+    if (Math.max(...spWords.map(sw => wms(nw, sw))) > 0.65) hits++;
   });
+  const wordScore    = hits / nameWords.length;
+  const phoneticFull = soundex(name) === soundex(sp.slice(0, name.length + 5)) ? 0.78 : 0;
+  const rawScore     = Math.max(wordScore, phoneticFull);
 
-  // ALL words must score above threshold — not just the average
-  // This prevents "Paneer Fried Momo" matching "Paneer Steam Momo":
-  //   "fried" vs "steam" → sim ~0.1 → fails
-  const minScore = Math.min(...wordScores);
-  const avgScore = wordScores.reduce((a,b)=>a+b,0) / wordScores.length;
+  if (rawScore < 0.75) return 0;  // doesn't pass basic threshold
 
-  // Both min AND avg must clear the bar
-  if (minScore < 0.55) return 0;   // any word failing = no match
-  return avgScore;
+  // ── Confusion guard: prevent "Paneer Steam Momo" matching "fried momo" ─────
+  if (allItemNames && allItemNames.length > 0) {
+    const allWords = allItemNames.flatMap(n => n.toLowerCase().split(" "));
+    const freq = {};
+    allWords.forEach(w => freq[w] = (freq[w] || 0) + 1);
+    const N = allItemNames.length;
+    const isDistinctive = w => (freq[w] || 0) < N / 2;
+
+    for (const sw of spWords) {
+      // Find which distinctive word across all items this spoken word best matches
+      let bestScore = 0, bestWord = "", bestItem = "";
+      for (const other of allItemNames) {
+        for (const ow of other.toLowerCase().split(" ")) {
+          if (!isDistinctive(ow)) continue;
+          const s = wms(sw, ow);
+          if (s > bestScore) { bestScore = s; bestWord = ow; bestItem = other.toLowerCase(); }
+        }
+      }
+      // Only act if spoken word unambiguously maps to some distinctive word (≥ 0.82)
+      if (bestScore < 0.82) continue;
+      // If that word is NOT in this item, and the item it belongs to is different → reject
+      const thisHasWord = nameWords.some(nw => wms(nw, bestWord) > 0.65);
+      if (!thisHasWord && bestItem !== name) return 0;
+    }
+  }
+  return rawScore;
 }
 
 const NUM_WORDS = {one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10};
@@ -628,8 +665,9 @@ function TakeOrderPage({ menu, orders, setOrders, toast }) {
             menu.forEach(item => {
               if (addedRef.current.has(item.id)) return;
               // Use strict voice matching — ALL words must match
-              const best = Math.max(...alts.map(a => voiceMatchScore(item.name, a)));
-              if (best >= 0.72) {
+              const allNames = menu.map(m => m.name);
+              const best = Math.max(...alts.map(a => matchScore(item.name, a, allNames)));
+              if (best >= 0.75) {
                 let qty = 1;
                 alts.forEach(a => {
                   const qm = a.match(/(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+/);
