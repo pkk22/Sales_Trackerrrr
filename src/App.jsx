@@ -408,63 +408,86 @@ function parseMenuText(rawText) {
   const lines = rawText.split("\n").map(l => l.trim()).filter(l => l.length > 1);
 
   // ── Section header tracking ────────────────────────────────────────────────
-  const SECTION_MAP = {
-    "veg burger": "Burger", "burger": "Burger",
-    "veg momo": "Snacks",   "momo": "Snacks",
-    "french fries": "Sides","fries": "Sides",
-    "snack": "Snacks",      "starter": "Starter",
-    "main": "Main",         "drink": "Drink", "beverage": "Drink",
-    "dessert": "Dessert",   "bread": "Bread",
-    "pizza": "Pizza",       "pasta": "Pasta",
-    "non.?veg": "Non-Veg",  "chicken": "Non-Veg",
-  };
+  // Maps any recognisable header keyword → category name
+  const SECTION_MAP = [
+    { re: /veg\s+burger|non.?veg\s+burger/i,  cat: "Burger"  },
+    { re: /\bburgers?\b/i,                     cat: "Burger"  },
+    { re: /veg\s+momo|paneer\s+momo/i,         cat: "Snacks"  },
+    { re: /\bmomos?\b/i,                       cat: "Snacks"  },
+    { re: /french\s+fries|fries/i,             cat: "Sides"   },
+    { re: /\bsides?\b/i,                       cat: "Sides"   },
+    { re: /\bpizza\b/i,                        cat: "Pizza"   },
+    { re: /\bpasta\b/i,                        cat: "Pasta"   },
+    { re: /\bstarters?\b/i,                    cat: "Starter" },
+    { re: /\bmains?\b/i,                       cat: "Main"    },
+    { re: /\bdrinks?\b|\bbeverages?\b/i,       cat: "Drink"   },
+    { re: /\bdesserts?\b/i,                    cat: "Dessert" },
+    { re: /\bbreads?\b/i,                      cat: "Bread"   },
+    { re: /\brice\b|\bbiryani\b/i,             cat: "Rice"    },
+    { re: /\bnon.?veg\b/i,                     cat: "Non-Veg" },
+    { re: /\bsnacks?\b/i,                      cat: "Snacks"  },
+  ];
   let sectionCat = null;
 
   const getSectionCat = (line) => {
-    const c = line.replace(/[^a-zA-Z\s]/g,"").toLowerCase().trim();
-    for (const [k, v] of Object.entries(SECTION_MAP))
-      if (new RegExp(`\\b${k}\\b`).test(c)) return v;
+    // Strip prices and noise, keep only letters/spaces
+    const clean = line.replace(/[\d₹\/\-\.\|_•*]/g, " ").trim();
+    for (const { re, cat } of SECTION_MAP)
+      if (re.test(clean)) return cat;
     return null;
   };
 
+  // A line is a section header if it has no prices OR it's a short all-caps/bold label
+  // (Tesseract often reads "VEG BURGERS Meal" as one line — we treat it as a header
+  //  by checking if the FIRST part matches a section keyword even if prices follow)
   const isSectionHeader = (line) => {
-    if (!/\d{2,4}/.test(line)) {         // no prices on the line
-      const cat = getSectionCat(line);
-      if (cat) return true;
+    // Has prices → only treat as header if the non-price part alone matches a section
+    const withoutPrices = line.replace(/(?:₹|Rs\.?\s*)?\d{2,4}(?:\.\d{0,2})?\s*(?:\/-)?\s*/g, "").trim();
+    if (withoutPrices.length < 2) return false;
+    const cat = getSectionCat(withoutPrices);
+    if (!cat) return false;
+    // If the line has prices but the text part is very short (just a header label), accept it
+    const hasPrices = /\d{2,4}/.test(line);
+    if (hasPrices) {
+      // Only treat as header if the text part is short — e.g. "VEG BURGERS Meal" (no item name)
+      return withoutPrices.split(/\s+/).length <= 4;
     }
-    return false;
+    return true;
   };
 
-  // ── Column label detection across full text ────────────────────────────────
+  // ── Column label detection ─────────────────────────────────────────────────
   const full = lines.join(" ");
   let colLabels = null;
   const LABEL_PATTERNS = [
-    { re:/\bhalf\b.{0,20}\bfull\b/i,              labels:["Regular","Medium"] },
+    { re:/\bhalf\b.{0,20}\bfull\b/i,                    labels:["Regular","Medium"] },
     { re:/\bsmall\b.{0,20}\bmedium\b.{0,20}\blarge\b/i, labels:["Small","Medium","Large"] },
     { re:/\bregular\b.{0,20}\bmedium\b.{0,20}\blarge\b/i,labels:["Regular","Medium","Large"] },
-    { re:/\bsmall\b.{0,20}\blarge\b/i,            labels:["Small","Large"] },
-    { re:/\bregular\b.{0,20}\blarge\b/i,          labels:["Regular","Large"] },
-    { re:/\bmini\b.{0,20}\bfull\b/i,              labels:["Mini","Full"] },
-    { re:/\bregular\b.{0,20}\bmeal\b/i,           labels:["Regular","Meal"] },
-    { re:/\bsingle\b.{0,20}\bdouble\b/i,          labels:["Single","Double"] },
+    { re:/\bsmall\b.{0,20}\blarge\b/i,                  labels:["Small","Large"] },
+    { re:/\bregular\b.{0,20}\blarge\b/i,                labels:["Regular","Large"] },
+    { re:/\bmini\b.{0,20}\bfull\b/i,                    labels:["Mini","Full"] },
+    { re:/\bregular\b.{0,20}\bmeal\b/i,                 labels:["Regular","Meal"] },
+    { re:/\bsingle\b.{0,20}\bdouble\b/i,                labels:["Single","Double"] },
   ];
   for (const p of LABEL_PATTERNS) { if (p.re.test(full)) { colLabels = p.labels; break; } }
 
-  // ── Category guesser ──────────────────────────────────────────────────────
+  // ── Category guesser — item name fallback when no section is active ────────
+  // IMPORTANT: check burger/fries/momo BEFORE paneer/chicken so that
+  // "Paneer Cheese Burger" → Burger, not Main
   const guessCategory = (name) => {
     if (sectionCat) return sectionCat;
     const n = name.toLowerCase();
-    if (/burger|sandwich|wrap/.test(n)) return "Burger";
-    if (/momo|dumpling/.test(n))        return "Snacks";
-    if (/pizza/.test(n))                return "Pizza";
-    if (/fries|wedges|nugget/.test(n))  return "Sides";
-    if (/pasta|noodle|maggi/.test(n))   return "Pasta";
-    if (/chicken|mutton|fish|prawn|kebab|tikka|tandoor/.test(n)) return "Non-Veg";
-    if (/paneer|dal|palak|aloo|gobi/.test(n)) return "Main";
-    if (/naan|roti|paratha/.test(n))    return "Bread";
-    if (/rice|biryani|pulao/.test(n))   return "Rice";
-    if (/lassi|chai|tea|coffee|juice|soda|shake/.test(n)) return "Drink";
-    if (/gulab|kulfi|halwa|ice.?cream/.test(n)) return "Dessert";
+    if (/burger|sandwich|wrap/i.test(n))                              return "Burger";
+    if (/\bfries\b|wedges|nugget/i.test(n))                          return "Sides";
+    if (/momo|dumpling/i.test(n))                                    return "Snacks";
+    if (/pizza/i.test(n))                                            return "Pizza";
+    if (/pasta|noodle|maggi/i.test(n))                               return "Pasta";
+    if (/\brice\b|biryani|pulao/i.test(n))                           return "Rice";
+    if (/naan|roti|paratha/i.test(n))                                return "Bread";
+    if (/lassi|chai|\btea\b|coffee|juice|\bsoda\b|shake|mojito/i.test(n)) return "Drink";
+    if (/gulab|kulfi|halwa|ice.?cream|dessert/i.test(n))             return "Dessert";
+    if (/soup|salad|raita/i.test(n))                                 return "Starter";
+    if (/chicken|mutton|fish|prawn|lamb|kebab|tikka|tandoor/i.test(n)) return "Non-Veg";
+    if (/paneer|tofu|dal|palak|aloo|gobi|mushroom|rajma/i.test(n))  return "Main";
     return "Main";
   };
 
@@ -492,7 +515,7 @@ function parseMenuText(rawText) {
     return false;
   };
 
-  const SKIP_LINE = /^(menu|half|full|regular|large|small|medium|meal|size|price|item|name|category|qty|tax|total|subtotal|gst|note|chef|welcome|call|order|contact|phone|address|email|www|http|veg\s+burgers?|veg\s+momos?|french\s+fries|snacks?|starters?|mains?|drinks?|desserts?|breads?|sides?|pizza|pasta|beverages?)$/i;
+  const SKIP_LINE = /^(menu|half|full|regular|large|small|medium|meal|size|price|item|name|category|qty|tax|total|subtotal|gst|note|chef|welcome|call|order|contact|phone|address|email|www|http)$/i;
 
   // Price regex
   const PRICE_RE = /(?:₹|Rs\.?\s*)?(\d{2,4})(?:\.\d{0,2})?\s*(?:\/-)?/g;
@@ -500,11 +523,13 @@ function parseMenuText(rawText) {
   const results = [];
 
   for (const line of lines) {
-    // Section header check
-    if (isSectionHeader(line)) {
-      const c = getSectionCat(line); if (c) sectionCat = c;
-      continue;
-    }
+    // Always check if this line sets a new section — even if it also has prices
+    // e.g. "VEG MOMOS Half Full" or "French Fries Half Full" sets sectionCat
+    const possibleSection = getSectionCat(line.replace(/[\d₹\/\-\.]/g," "));
+    if (possibleSection) sectionCat = possibleSection;
+
+    // If it's purely a header (no real item name + price), skip it
+    if (isSectionHeader(line)) continue;
 
     // Extract prices
     const prices = [];
@@ -549,18 +574,9 @@ function TakeOrderPage({ menu, orders, setOrders, toast }) {
   const [cart,         setCart]         = useState([]);
   const [isRecording,  setIsRecording]  = useState(false);
   const [transcript,   setTranscript]   = useState("");
-  const [interimText,  setInterimText]  = useState("");
   const [note,         setNote]         = useState("");
-  const [micError,     setMicError]     = useState("");
-  const [noiseLevel,   setNoiseLevel]   = useState(0);
-  const [micMatches,   setMicMatches]   = useState([]);
 
-  const recRef      = useRef(null);
-  const audioCtxRef = useRef(null);
-  const analyserRef = useRef(null);
-  const rafRef      = useRef(null);
-  const addedRef    = useRef(new Set());
-  const activeRef   = useRef(false);
+  const recognitionRef = useRef(null);
 
   const activeOrders  = orders.filter(o => o.status === "active");
   const recentOrders  = orders.filter(o => o.status === "finished");
@@ -597,114 +613,35 @@ function TakeOrderPage({ menu, orders, setOrders, toast }) {
     toast("Order marked as finished!");
   };
 
-  // ── Voice mic ────────────────────────────────────────────────────────────
-  const stopMic = useCallback(() => {
-    activeRef.current = false;
-    recRef.current?.stop();
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    if (audioCtxRef.current) { try { audioCtxRef.current.close(); } catch {} audioCtxRef.current = null; }
-    analyserRef.current = null;
-    setIsRecording(false); setNoiseLevel(0); setInterimText(""); addedRef.current.clear();
-  }, []);
-
-  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-
-  const toggleMic = async () => {
+  // ── Voice — exact original implementation ────────────────────────────────
+  const toggleMic = () => {
     if (!("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
-      toast("Use Chrome or Edge for voice support"); return;
+      toast("Speech recognition not supported in this browser");
+      return;
     }
-    if (isRecording) { stopMic(); return; }
-    setMicError(""); setMicMatches([]);
-
-    // Desktop only: audio visualiser (mobile: skip to avoid mic conflict)
-    if (!isMobile) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio:{ echoCancellation:{ideal:true}, noiseSuppression:{ideal:true}, autoGainControl:{ideal:true} }
-        });
-        const ctx = new (window.AudioContext||window.webkitAudioContext)();
-        const src = ctx.createMediaStreamSource(stream);
-        const hp  = ctx.createBiquadFilter();
-        hp.type="highpass"; hp.frequency.value=180; hp.Q.value=0.7;
-        const an = ctx.createAnalyser();
-        an.fftSize=512; an.smoothingTimeConstant=0.8;
-        src.connect(hp); hp.connect(an);
-        audioCtxRef.current = ctx; analyserRef.current = an;
-        const buf = new Uint8Array(an.frequencyBinCount);
-        const tick = () => {
-          if (!analyserRef.current) return;
-          analyserRef.current.getByteFrequencyData(buf);
-          const avg = buf.slice(3,40).reduce((a,b)=>a+b,0)/37;
-          setNoiseLevel(Math.min(100, avg*2.6));
-          rafRef.current = requestAnimationFrame(tick);
-        };
-        tick();
-      } catch {}
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      setIsRecording(false);
+      return;
     }
-
-    activeRef.current = true;
-    setIsRecording(true); setTranscript("");
-
-    const buildRec = () => {
-      if (!activeRef.current) return;
-      const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
-      const rec = new Rec();
-      rec.continuous     = !isMobile;
-      rec.interimResults = true;
-      rec.lang           = "en-IN";
-      rec.maxAlternatives = 5;
-
-      rec.onresult = (e) => {
-        let finals = ""; let interim = "";
-        for (let i=e.resultIndex; i<e.results.length; i++) {
-          const res  = e.results[i];
-          const alts = Array.from({length:res.length}, (_,k) => res[k].transcript.toLowerCase());
-          if (res.isFinal) {
-            finals += res[0].transcript + " ";
-            const newlyAdded = [];
-            menu.forEach(item => {
-              if (addedRef.current.has(item.id)) return;
-              // Use strict voice matching — ALL words must match
-              const allNames = menu.map(m => m.name);
-              const best = Math.max(...alts.map(a => matchScore(item.name, a, allNames)));
-              if (best >= 0.75) {
-                let qty = 1;
-                alts.forEach(a => {
-                  const qm = a.match(/(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+/);
-                  if (qm) { const q = qm[1]; qty = isNaN(q) ? (NUM_WORDS[q]||1) : parseInt(q); }
-                });
-                qty = Math.min(qty, 10);
-                for (let q=0;q<qty;q++) addItem(item);
-                addedRef.current.add(item.id);
-                newlyAdded.push(`${item.name}${qty>1?` ×${qty}`:""}`);
-              }
-            });
-            if (newlyAdded.length) setMicMatches(prev => [...prev.slice(-4), ...newlyAdded]);
-            alts.forEach(a => {
-              const tm = a.match(/table\s+(?:number\s+)?([a-z0-9-]+)/i);
-              if (tm) setTableNum(tm[1].toUpperCase());
-            });
-          } else {
-            interim += res[0].transcript;
-          }
+    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const rec = new Rec();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = "en-IN";
+    rec.onresult = (e) => {
+      const t = Array.from(e.results).map((r) => r[0].transcript).join(" ");
+      setTranscript(t);
+      menu.forEach((item) => {
+        if (t.toLowerCase().includes(item.name.toLowerCase())) {
+          addItem(item);
         }
-        if (finals) setTranscript(prev => (prev + finals).slice(-300));
-        setInterimText(interim);
-      };
-      rec.onerror = ev => {
-        if (ev.error==="not-allowed") {
-          setMicError("Mic blocked — tap 🔒 → Permissions → Microphone → Allow → refresh");
-        } else if (ev.error!=="no-speech" && ev.error!=="aborted") {
-          setMicError(`Mic: ${ev.error}`);
-        }
-      };
-      rec.onend = () => {
-        if (activeRef.current) setTimeout(buildRec, isMobile ? 300 : 150);
-      };
-      rec.start();
-      recRef.current = rec;
+      });
     };
-    buildRec();
+    rec.onend = () => setIsRecording(false);
+    rec.start();
+    recognitionRef.current = rec;
+    setIsRecording(true);
   };
 
   const categories = [...new Set(menu.map(m => m.category))];
@@ -736,38 +673,18 @@ function TakeOrderPage({ menu, orders, setOrders, toast }) {
         </div>
 
         {/* Voice + Search */}
-        <div style={{display:"flex",gap:14,marginBottom:16,alignItems:"flex-start"}}>
-          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
-            <button className={`mic-btn ${isRecording?"recording":"idle"}`} onClick={toggleMic}>
-              {isRecording ? "⏹" : "🎙️"}
-            </button>
-            {isRecording && (
-              <div style={{display:"flex",gap:3,alignItems:"center",height:22}}>
-                {[...Array(7)].map((_,i) => (
-                  <div key={i} className="wave-bar" style={{height:`${10+(noiseLevel/100)*14}px`,animationDelay:`${i*0.09}s`,opacity:noiseLevel>4?1:0.3}} />
-                ))}
-              </div>
-            )}
-          </div>
+        <div style={{display:"flex",gap:12,marginBottom:16,alignItems:"center"}}>
+          <button className={`mic-btn ${isRecording?"recording":"idle"}`} onClick={toggleMic} title={isRecording?"Stop recording":"Voice order"}>
+            🎙️
+          </button>
           <div style={{flex:1}}>
-            <input className="input" placeholder="Search menu…" value={search} onChange={e=>setSearch(e.target.value)} />
+            <input className="input" placeholder="Search menu items…" value={search} onChange={e=>setSearch(e.target.value)} />
             {isRecording && (
-              <div style={{marginTop:8,padding:"10px 14px",background:"var(--surface2)",borderRadius:10,border:"1px solid #ff6b3530"}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-                  <div className="rec-dot" />
-                  <span style={{fontSize:12,color:"var(--accent)",fontWeight:600}}>Listening…</span>
-                </div>
-                {interimText && <div style={{fontSize:12,color:"var(--muted)",fontStyle:"italic",marginBottom:6}}>"{interimText}"</div>}
-                {micMatches.length > 0 && (
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                    {micMatches.map((m,i) => (
-                      <span key={i} style={{background:"#06d6a020",color:"var(--accent3)",borderRadius:100,padding:"2px 10px",fontSize:12,border:"1px solid #06d6a030"}}>✓ {m}</span>
-                    ))}
-                  </div>
-                )}
+              <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8}}>
+                <div className="rec-dot" />
+                <span style={{fontSize:13,color:"var(--muted)"}}>{transcript || "Listening for items…"}</span>
               </div>
             )}
-            {micError && <div style={{fontSize:12,color:"var(--danger)",marginTop:6}}>⚠ {micError}</div>}
           </div>
         </div>
 
