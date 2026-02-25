@@ -1132,93 +1132,176 @@ function preprocessImageForOCR(imageSrc) {
 }
 
 // ─── Multi-column menu text parser ───────────────────────────────────────────
-// Handles: "Item .... 40/- 70/-"  →  "Item (Half)" ₹40 + "Item (Full)" ₹70
-// Also handles: "Item .... ₹250"  →  single entry
-function parseMenuText(rawText, columnLabels) {
-  // columnLabels can be detected from the menu or provided, e.g. ["Half","Full"] or ["Regular","Meal"]
-  const lines = rawText.split("\n").map(l => l.trim()).filter(l => l.length > 2);
+function parseMenuText(rawText) {
+  const lines = rawText.split("\n").map(l => l.trim()).filter(l => l.length > 1);
   const results = [];
 
-  // Match ALL price occurrences on a line — key fix for multi-column menus
-  // Matches: 40/- | ₹40 | Rs40 | Rs. 40 | 40.00 | plain 40 at word boundary
-  const allPricesRe = /(?:₹|Rs\.?\s*)?(\d{2,4})(?:\.\d{0,2})?\s*(?:\/-)?/g;
+  // ── Noise rejection — multi-signal filter tuned for restaurant menus ───────
+  // Whitelisted food words are ALWAYS trusted even if other signals look noisy.
+  const FOOD_WORDS = /^(veg|paneer|chicken|momo|burger|fries|pizza|pasta|naan|roti|rice|biryani|lassi|chai|tea|coffee|juice|steam|fried|afghani|kurkure|chipotle|simply|classic|cheesy|salted|peri|just|cheese|tikka|tandoor|kebab|masala|wrap|sandwich|roll|curry|dal|palak|aloo|gobi|mushroom|gulab|kulfi|halwa|shake|soda|water|lemon|soup|salad|starter|dessert|special|combo|platter|non)$/i;
 
-  const skipWords = /^(menu|half|full|regular|large|small|medium|meal|size|price|item|name|category|qty|tax|total|subtotal|gst|inclusive|exclusive|note|chef|welcome|enjoy|call|no\.?|order|contact|phone|address|email|www\.|http|#|\d+$)$/i;
+  const isGarbage = (str) => {
+    const words = str.trim().split(/\s+/);
 
-  // Detect column header labels from the text (e.g. "Half Full", "Regular Meal", "Small Medium Large")
-  const detectColumnLabels = () => {
-    const headerPatterns = [
-      { re: /\bhalf\b.*\bfull\b/i,           labels: ["Half", "Full"] },
-      { re: /\bsmall\b.*\blarge\b/i,          labels: ["Small", "Large"] },
-      { re: /\bsmall\b.*\bmedium\b.*\blarge\b/i, labels: ["Small","Medium","Large"] },
-      { re: /\bregular\b.*\bmedium\b.*\blarge\b/i, labels: ["Regular","Medium","Large"] },
-      { re: /\bregular\b.*\blarge\b/i,        labels: ["Regular", "Large"] },
-      { re: /\bmini\b.*\bfull\b/i,            labels: ["Mini", "Full"] },
-      { re: /\bregular\b.*\bmeal\b/i,         labels: ["Regular", "Meal"] },
-      { re: /\bsingle\b.*\bdouble\b/i,        labels: ["Single", "Double"] },
-      { re: /\b6\s*pc\b.*\b12\s*pc\b/i,      labels: ["6pc", "12pc"] },
-    ];
-    const joined = lines.slice(0, 10).join(" "); // header is near top
-    for (const p of headerPatterns) {
-      if (p.re.test(joined)) return p.labels;
+    // ✅ Whitelist: any known food word → always keep
+    if (words.some(w => FOOD_WORDS.test(w))) return false;
+
+    // 🚫 Single-letter words that aren't a/I/&
+    if (words.some(w => w.length === 1 && !/^[aAiI&]$/.test(w))) return true;
+
+    // 🚫 Two or more tiny words (≤2 chars, not common short words)
+    const tiny = words.filter(w => w.length <= 2 && !/^(a|I|or|of|on|in|&|kg|pc|ml)$/i.test(w));
+    if (tiny.length >= 2) return true;
+
+    // 🚫 Any word with zero vowels and length ≥ 2 (OCR fragments like "Ps", "fs", "UE")
+    if (words.some(w => w.length >= 2 && !/[aeiouAEIOU]/.test(w))) return true;
+
+    // 🚫 Low vowel ratio across the whole name
+    const letters = str.replace(/[^a-zA-Z]/g, "");
+    const vowels  = (letters.match(/[aeiouAEIOU]/g) || []).length;
+    if (letters.length > 5 && vowels / letters.length < 0.18) return true;
+
+    // 🚫 Long unbroken uppercase run = logo / decorative text
+    if (/[A-Z]{6,}/.test(str.replace(/\s/g, ""))) return true;
+
+    // 🚫 All words ≤ 3 chars = likely OCR fragments
+    if (words.every(w => w.length <= 3) && words.length >= 2) return true;
+
+    return false;
+  };
+
+  // ── Column label detection — scans ALL lines, not just first 10 ──────────
+  // This handles menus where section headers appear mid-page (like yours)
+  const fullText = lines.join(" ");
+  let detectedLabels = null;
+  const labelPatterns = [
+    { re: /\bhalf\b.{0,20}\bfull\b/i,              labels: ["Regular", "Medium"] },  // Half→Regular, Full→Medium
+    { re: /\bsmall\b.{0,20}\bmedium\b.{0,20}\blarge\b/i, labels: ["Small","Medium","Large"] },
+    { re: /\bregular\b.{0,20}\bmedium\b.{0,20}\blarge\b/i, labels: ["Regular","Medium","Large"] },
+    { re: /\bsmall\b.{0,20}\blarge\b/i,            labels: ["Small", "Large"] },
+    { re: /\bregular\b.{0,20}\blarge\b/i,          labels: ["Regular", "Large"] },
+    { re: /\bmini\b.{0,20}\bfull\b/i,              labels: ["Mini", "Full"] },
+    { re: /\bregular\b.{0,20}\bmeal\b/i,           labels: ["Regular", "Meal"] },
+    { re: /\bsingle\b.{0,20}\bdouble\b/i,          labels: ["Single", "Double"] },
+    { re: /\b6\s*pc\b.{0,20}\b12\s*pc\b/i,        labels: ["6pc", "12pc"] },
+  ];
+  for (const p of labelPatterns) {
+    if (p.re.test(fullText)) { detectedLabels = p.labels; break; }
+  }
+
+  // ── Section header tracker — gives each item its category context ─────────
+  // When OCR reads "VEG BURGERS" or "French Fries" as a standalone line,
+  // we use it to tag subsequent items instead of treating it as an item itself.
+  const sectionCategoryMap = {
+    "veg burger": "Burger", "burger": "Burger",
+    "veg momo":   "Snacks", "momo":   "Snacks",
+    "french fries":"Sides", "fries":  "Sides",
+    "starter":    "Starter","starters":"Starter",
+    "main":       "Main",
+    "pizza":      "Pizza",
+    "pasta":      "Pasta",
+    "drink":      "Drink", "drinks": "Drink", "beverages": "Drink",
+    "dessert":    "Dessert","desserts":"Dessert","sweets":"Dessert",
+    "bread":      "Bread",
+    "rice":       "Rice",
+    "non.?veg":   "Non-Veg","chicken":"Non-Veg",
+    "snack":      "Snacks", "snacks": "Snacks",
+    "sides":      "Sides",
+  };
+  let currentSectionCategory = null;
+
+  const isSectionHeader = (line) => {
+    const clean = line.replace(/[^a-zA-Z\s]/g, "").trim().toLowerCase();
+    if (clean.length < 3 || clean.length > 40) return false;
+    for (const key of Object.keys(sectionCategoryMap)) {
+      if (new RegExp(`\\b${key}\\b`).test(clean)) return true;
+    }
+    return false;
+  };
+
+  const getSectionCategory = (line) => {
+    const clean = line.replace(/[^a-zA-Z\s]/g, "").trim().toLowerCase();
+    for (const [key, cat] of Object.entries(sectionCategoryMap)) {
+      if (new RegExp(`\\b${key}\\b`).test(clean)) return cat;
     }
     return null;
   };
 
-  const detectedLabels = columnLabels || detectColumnLabels();
-
+  // ── Item name → category guesser (fallback if no section header seen) ─────
   const guessCategory = (name) => {
+    if (currentSectionCategory) return currentSectionCategory;
     const n = name.toLowerCase();
-    if (/burger|sandwich|wrap|sub/.test(n))                          return "Burger";
-    if (/momo|dumpling/.test(n))                                     return "Snacks";
-    if (/pizza/.test(n))                                             return "Pizza";
-    if (/fries|wedges|nugget|popcorn/.test(n))                       return "Sides";
-    if (/pasta|noodle|maggi|spaghetti/.test(n))                      return "Pasta";
-    if (/chicken|mutton|fish|prawn|lamb|seekh|kebab|tikka|tandoor/.test(n)) return "Non-Veg";
-    if (/paneer|tofu|dal|palak|aloo|gobi|mushroom|rajma|chana/.test(n)) return "Main";
-    if (/naan|roti|paratha|kulcha|puri|bhatura/.test(n))             return "Bread";
-    if (/rice|biryani|pulao/.test(n))                                return "Rice";
-    if (/soup|salad|raita/.test(n))                                  return "Starter";
-    if (/lassi|chai|tea|coffee|juice|soda|water|shake|drink|mojito|lemon/.test(n)) return "Drink";
-    if (/gulab|kheer|halwa|ice.?cream|dessert|sweet|barfi|ladoo|kulfi/.test(n)) return "Dessert";
+    if (/burger|sandwich|wrap|sub/.test(n))  return "Burger";
+    if (/momo|dumpling/.test(n))             return "Snacks";
+    if (/pizza/.test(n))                     return "Pizza";
+    if (/fries|wedges|nugget/.test(n))       return "Sides";
+    if (/pasta|noodle|maggi/.test(n))        return "Pasta";
+    if (/chicken|mutton|fish|prawn|seekh|kebab|tikka|tandoor/.test(n)) return "Non-Veg";
+    if (/paneer|tofu|dal|palak|aloo|gobi|mushroom/.test(n)) return "Main";
+    if (/naan|roti|paratha|kulcha|puri/.test(n)) return "Bread";
+    if (/rice|biryani|pulao/.test(n))        return "Rice";
+    if (/lassi|chai|tea|coffee|juice|soda|shake/.test(n)) return "Drink";
+    if (/gulab|kheer|halwa|ice.?cream|kulfi/.test(n)) return "Dessert";
     return "Main";
   };
 
+  // ── Words that mark a line as NOT a menu item ─────────────────────────────
+  // Expanded significantly to catch OCR noise headers
+  const skipLineRe = /^(menu|half|full|regular|large|small|medium|meal|size|price|item|name|category|qty|tax|total|subtotal|gst|inclusive|exclusive|note|chef|welcome|enjoy|call|order|contact|phone|address|email|www|http|veg\s+burgers?|veg\s+momos?|french\s+fries|snacks?|starters?|mains?|drinks?|desserts?|breads?|sides?|pizza|pasta|beverages?)$/i;
+
+  // Price regex — matches: 40/- | ₹40 | Rs 40 | 40.00 | plain 40
+  const priceRe = /(?:₹|Rs\.?\s*)?(\d{2,4})(?:\.\d{0,2})?\s*(?:\/-)?/g;
+
   for (const line of lines) {
-    // Extract ALL prices from this line
-    const priceMatches = [];
+
+    // Check if this line is a section header — update context, skip as item
+    if (isSectionHeader(line)) {
+      const cat = getSectionCategory(line);
+      if (cat) currentSectionCategory = cat;
+      continue;
+    }
+
+    // Extract all prices from this line
+    const prices = [];
     let m;
-    const re = new RegExp(allPricesRe.source, "g");
+    const re = new RegExp(priceRe.source, "g");
     while ((m = re.exec(line)) !== null) {
       const p = parseInt(m[1]);
-      if (p >= 20 && p <= 3000) priceMatches.push({ val: p, index: m.index });
+      if (p >= 20 && p <= 3000) prices.push({ val: p, idx: m.index });
     }
-    if (priceMatches.length === 0) continue;
+    if (prices.length === 0) continue;
 
-    // Item name = text before the first price
-    let name = line.slice(0, priceMatches[0].index).trim();
-    name = name.replace(/^[\d\.\-\•\*\+\|]+\s*/, "").trim(); // strip leading bullets/pipes
-    name = name.replace(/[\.\-\s_]+$/, "").trim();            // strip trailing dots/dashes
-    name = name.replace(/^[^a-zA-Z]+/, "").trim();            // strip leading non-alpha
+    // Extract item name = everything before first price
+    let name = line.slice(0, prices[0].idx).trim();
+    name = name.replace(/^[\d\.\-–•*+|\\]+\s*/, "").trim(); // strip leading punctuation
+    name = name.replace(/[\.\-–_\s]+$/, "").trim();          // strip trailing dots/dashes
+    name = name.replace(/^[^a-zA-Z]+/, "").trim();           // strip leading non-alpha
 
+    // Hard filters
     if (name.length < 3) continue;
-    if (skipWords.test(name.split(/\s+/)[0])) continue;
+    if (skipLineRe.test(name.trim())) continue;
+    if (isGarbage(name)) continue;                           // ← NEW: rejects noise
 
-    if (priceMatches.length === 1) {
-      // Single price — straightforward entry
+    // Must have at least one letter (not just numbers/symbols)
+    if (!/[a-zA-Z]{2,}/.test(name)) continue;
+
+    // The name part should have reasonable word count (1–6 words for menu items)
+    const wordCount = name.trim().split(/\s+/).length;
+    if (wordCount > 7) continue;                             // ← rejects long OCR garble
+
+    if (prices.length === 1) {
       if (!results.find(r => r.name.toLowerCase() === name.toLowerCase())) {
-        results.push({ name, category: guessCategory(name), price: priceMatches[0].val });
+        results.push({ name, category: guessCategory(name), price: prices[0].val });
       }
     } else {
-      // Multiple prices on the same line → create one entry per price column
-      const labels = detectedLabels || priceMatches.map((_, i) =>
-        ["Regular","Medium","Large","XL"][i] || `Size ${i+1}`
-      );
-      priceMatches.forEach((pm, i) => {
-        const suffix = labels[i] ? ` (${labels[i]})` : ` (Size ${i+1})`;
-        const entryName = name + suffix;
-        if (!results.find(r => r.name.toLowerCase() === entryName.toLowerCase())) {
-          results.push({ name: entryName, category: guessCategory(name), price: pm.val });
+      // Multi-price line → one entry per column
+      const labels = detectedLabels ||
+        prices.map((_, i) => ["Regular","Medium","Large","XL"][i] || `Size ${i+1}`);
+      prices.forEach((p, i) => {
+        const label    = labels[i] || `Size ${i+1}`;
+        const fullName = `${name} (${label})`;
+        if (!results.find(r => r.name.toLowerCase() === fullName.toLowerCase())) {
+          results.push({ name: fullName, category: guessCategory(name), price: p.val });
         }
       });
     }
@@ -1253,44 +1336,75 @@ function MenuPage({ menu, setMenu, toast }) {
   }, [mediaItems]);
 
   // ── Common OCR misread corrections (restaurant domain) ─────────────────────
-  // Tesseract frequently confuses these character pairs in menu fonts
   const fixOcrText = (t) => t
-    // Number/letter swaps
-    .replace(/\b0(?=[a-zA-Z])/g, "O")       // 0ld → Old
-    .replace(/(?<=[a-zA-Z])0\b/g, "o")       // Mang0 → Mango
-    .replace(/\bl\b/g, "1")                  // lone l between spaces = 1
-    .replace(/(?<=\d)l(?=\d)/g, "1")         // 1l0 → 110
-    .replace(/(?<=\s)I(?=\s)/g, "1")         // space-I-space = 1
-    .replace(/\bVVeg\b/gi, "Veg")            // doubled V
+    .replace(/\b0(?=[a-zA-Z])/g, "O")
+    .replace(/(?<=[a-zA-Z])0\b/g, "o")
+    .replace(/\bl\b/g, "1")
+    .replace(/(?<=\d)l(?=\d)/g, "1")
+    .replace(/(?<=\s)I(?=\s)/g, "1")
+    .replace(/\bVVeg\b/gi, "Veg")
     .replace(/\bPanear\b/gi, "Paneer")
     .replace(/\bPaneer\s+Tikk[ae]\b/gi, "Paneer Tikka")
     .replace(/\bBiryam\b/gi, "Biryani")
     .replace(/\bBuger\b/gi, "Burger")
     .replace(/\bBurqer\b/gi, "Burger")
+    .replace(/\bCheeze\b/gi, "Cheese")
     .replace(/\bChiken\b/gi, "Chicken")
     .replace(/\bNann?\b/gi, "Naan")
-    .replace(/\bLassi\b/gi, "Lassi")
     .replace(/\bMom[o0]\b/gi, "Momo")
     .replace(/\bFrise\b/gi, "Fries")
     .replace(/\bFri[e3]s\b/gi, "Fries")
-    // Price separators — normalise
-    .replace(/(\d)\s*[|l]\s*-/g, "$1/-")     // 40l- → 40/-
-    .replace(/(\d)\s*\/\s*\-/g, "$1/-")      // 40 /- → 40/-
+    .replace(/\bChiopt[eo]l[e3]\b/gi, "Chipotle")
+    .replace(/\bS[il1]mply\b/gi, "Simply")
+    .replace(/\bP[ae]n[ae]{1,2}r\b/gi, "Paneer")
+    .replace(/\bAfgh[ae]n[il1]\b/gi, "Afghani")
+    .replace(/\bKurku[re][e]?\b/gi, "Kurkure")
+    .replace(/\bP[e3]r[il1]\s+P[e3]r[il1]\b/gi, "Peri Peri")
+    .replace(/\bS[a4]lt[e3]d\b/gi, "Salted")
+    .replace(/(\d)\s*[|l]\s*-/g, "$1/-")
+    .replace(/(\d)\s*\/\s*\-/g, "$1/-")
     .replace(/Rs\s*\.\s*/gi, "Rs.")
-    // Strip stray pipe/underscores between words
-    .replace(/([a-zA-Z])\s*[|_]\s*([a-zA-Z])/g, "$1 $2");
+    .replace(/([a-zA-Z])\s*[|_]\s*([a-zA-Z])/g, "$1 $2")
+    // Remove lines that are ALL CAPS and have no prices (likely decorative headers)
+    .split("\n").map(line => {
+      const noPrice = !/\d{2,4}/.test(line);
+      const allCaps = line.length > 3 && line === line.toUpperCase() && /[A-Z]{3,}/.test(line);
+      return (noPrice && allCaps) ? "" : line;
+    }).join("\n");
 
-  // ── 4-pass Tesseract OCR across two preprocessed image versions ─────────────
+  // ── 5-pass Tesseract OCR across three preprocessed image versions ─────────
   const runOCR = async (id, imageSrc) => {
     await loadTesseract();
     const { createWorker } = window.Tesseract;
 
-    // Get both preprocessed versions
-    let srcA = imageSrc, srcB = imageSrc;
+    // Get both preprocessed versions + inverted version
+    let srcA = imageSrc, srcB = imageSrc, srcC = imageSrc;
     try {
       const result = await preprocessImageForOCR(imageSrc);
       srcA = result.a;  // contrast-stretch + unsharp  (bright/clean menus)
       srcB = result.b;  // histogram equalisation       (dark/uneven menus)
+      // srcC = pixel-inverted version of srcB — handles white text on dark/photo backgrounds
+      // (like the French Fries section with a burger photo behind it)
+      srcC = await new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const cv = document.createElement("canvas");
+          cv.width = img.width; cv.height = img.height;
+          const ctx = cv.getContext("2d");
+          ctx.drawImage(img, 0, 0);
+          const id2 = ctx.getImageData(0, 0, cv.width, cv.height);
+          const d = id2.data;
+          for (let i = 0; i < d.length; i += 4) {
+            d[i]   = 255 - d[i];
+            d[i+1] = 255 - d[i+1];
+            d[i+2] = 255 - d[i+2];
+          }
+          ctx.putImageData(id2, 0, 0);
+          resolve(cv.toDataURL("image/png"));
+        };
+        img.onerror = () => resolve(imageSrc);
+        img.src = result.b; // invert the equalised version
+      });
     } catch { /* fallback: use original */ }
 
     const worker = await createWorker("eng", 1, { logger: () => {} });
@@ -1306,16 +1420,19 @@ function MenuPage({ menu, setMenu, toast }) {
       await worker.setParameters({ ...baseParams, tessedit_pageseg_mode: "6" });
       texts.push((await worker.recognize(srcA)).data.text);
 
-      // Pass 2 — PSM 6 on srcB: same layout, histogram-equalised (dark menus)
+      // Pass 2 — PSM 6 on srcB: histogram-equalised (dark backgrounds)
       texts.push((await worker.recognize(srcB)).data.text);
 
-      // Pass 3 — PSM 4 on srcA: single column, variable sizes
+      // Pass 3 — PSM 6 on srcC: INVERTED — white-on-dark text (photo backgrounds)
+      texts.push((await worker.recognize(srcC)).data.text);
+
+      // Pass 4 — PSM 4 on srcA: single column, variable text sizes
       await worker.setParameters({ ...baseParams, tessedit_pageseg_mode: "4" });
       texts.push((await worker.recognize(srcA)).data.text);
 
-      // Pass 4 — PSM 11 on srcB: sparse text, catches decorative fonts
+      // Pass 5 — PSM 11 on srcC: sparse text on inverted image
       await worker.setParameters({ ...baseParams, tessedit_pageseg_mode: "11" });
-      texts.push((await worker.recognize(srcB)).data.text);
+      texts.push((await worker.recognize(srcC)).data.text);
     } catch {
       toast("OCR failed — try better lighting or a flatter photo");
     } finally {
