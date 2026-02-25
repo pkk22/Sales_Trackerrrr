@@ -119,18 +119,7 @@ const CUSTOMER_TYPES = [
   { id: "friends", label: "Friends", emoji: "👥",      color: "#06d6a0" },
 ];
 
-const SAMPLE_MENU = [
-  { id: 1,  name: "Butter Chicken",   category: "Main",    price: 280 },
-  { id: 2,  name: "Paneer Tikka",     category: "Starter", price: 220 },
-  { id: 3,  name: "Dal Makhani",      category: "Main",    price: 180 },
-  { id: 4,  name: "Garlic Naan",      category: "Bread",   price: 60  },
-  { id: 5,  name: "Biryani",          category: "Main",    price: 320 },
-  { id: 6,  name: "Mango Lassi",      category: "Drink",   price: 90  },
-  { id: 7,  name: "Gulab Jamun",      category: "Dessert", price: 80  },
-  { id: 8,  name: "Masala Chai",      category: "Drink",   price: 40  },
-  { id: 9,  name: "Tandoori Chicken", category: "Starter", price: 350 },
-  { id: 10, name: "Palak Paneer",     category: "Main",    price: 200 },
-];
+const SAMPLE_MENU = []; // Start empty — add items via camera/OCR or manually
 
 // ─── Fuzzy / phonetic helpers for better voice accuracy ──────────────────────
 function soundex(s) {
@@ -1042,74 +1031,85 @@ function loadTesseract() {
   });
 }
 
-// ─── OCR text → menu items parser ────────────────────────────────────────────
-// Handles common menu layouts: "Item Name .... 250", "Item Name Rs 250", etc.
-// ─── Preprocess image for better OCR ─────────────────────────────────────────
-// Upscale + grayscale + high contrast — dramatically helps Tesseract on photos
+// ─── Preprocess image for OCR ─────────────────────────────────────────────────
+// Pipeline: upscale → grayscale → adaptive threshold (Sauvola) → unsharp mask
 function preprocessImageForOCR(imageSrc) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
-      // Scale up to at least 2000px wide for better OCR resolution
-      const scale = Math.max(1, 2000 / img.width);
+      // 1. Upscale to ~2400px wide (≈300dpi) — Tesseract optimal range
+      const scale = Math.max(1, Math.min(4, 2400 / img.width));
       const w = Math.round(img.width  * scale);
       const h = Math.round(img.height * scale);
 
       const canvas = document.createElement("canvas");
-      canvas.width  = w;
-      canvas.height = h;
+      canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext("2d");
-
-      // Draw upscaled
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
       ctx.drawImage(img, 0, 0, w, h);
 
-      // Pixel-level processing: grayscale + contrast boost + sharpening
       const imageData = ctx.getImageData(0, 0, w, h);
       const d = imageData.data;
+      const gray = new Uint8Array(w * h);
 
-      // Step 1: grayscale
+      // 2. Grayscale
       for (let i = 0; i < d.length; i += 4) {
-        const gray = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
-        d[i] = d[i+1] = d[i+2] = gray;
+        gray[i >> 2] = Math.round(0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2]);
       }
 
-      // Step 2: contrast stretch (find min/max, remap to 0-255)
-      let min = 255, max = 0;
-      for (let i = 0; i < d.length; i += 4) { min = Math.min(min, d[i]); max = Math.max(max, d[i]); }
-      const range = max - min || 1;
-      for (let i = 0; i < d.length; i += 4) {
-        const v = Math.round(((d[i] - min) / range) * 255);
-        // S-curve for extra punch: makes text darker, bg lighter
-        const s = v < 128 ? (2 * v * v) / 255 : 255 - (2 * (255 - v) * (255 - v)) / 255;
-        d[i] = d[i+1] = d[i+2] = s;
-      }
+      // 3. Adaptive threshold — Sauvola method with 31×31 window
+      //    Handles uneven lighting, dark/coloured backgrounds, glare on laminated menus
+      const k = 0.34, R = 128;
+      const wh = 15; // half-window = 15 → full window = 31px
+      const out = new Uint8Array(w * h);
 
-      // Step 3: unsharp mask (3x3 gaussian blur subtracted)
-      const src = new Uint8ClampedArray(d);
-      const blur = (x, y) => {
-        const kernel = [-1,-2,-1,-2,12,-2,-1,-2,-1]; // high-pass sharpening kernel (sum=0, center=12, divide by 4)
-        let acc = 0;
-        let k = 0;
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            const nx = Math.min(w-1, Math.max(0, x+dx));
-            const ny = Math.min(h-1, Math.max(0, y+dy));
-            acc += src[(ny * w + nx) * 4] * kernel[k++];
-          }
-        }
-        return Math.min(255, Math.max(0, acc / 4));
-      };
+      // Integral image for O(1) mean & variance per window
+      const intg  = new Float64Array((w+1)*(h+1));
+      const intg2 = new Float64Array((w+1)*(h+1));
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
-          const idx = (y * w + x) * 4;
-          const sharpened = blur(x, y);
-          d[idx] = d[idx+1] = d[idx+2] = sharpened;
+          const v = gray[y*w+x];
+          intg [(y+1)*(w+1)+(x+1)] = v   + intg [y*(w+1)+(x+1)] + intg [(y+1)*(w+1)+x] - intg [y*(w+1)+x];
+          intg2[(y+1)*(w+1)+(x+1)] = v*v + intg2[y*(w+1)+(x+1)] + intg2[(y+1)*(w+1)+x] - intg2[y*(w+1)+x];
+        }
+      }
+      for (let y = 0; y < h; y++) {
+        const y1 = Math.max(0,y-wh), y2 = Math.min(h-1,y+wh);
+        for (let x = 0; x < w; x++) {
+          const x1 = Math.max(0,x-wh), x2 = Math.min(w-1,x+wh);
+          const n  = (x2-x1+1)*(y2-y1+1);
+          const s  = intg [(y2+1)*(w+1)+(x2+1)] - intg [y1*(w+1)+(x2+1)] - intg [(y2+1)*(w+1)+x1] + intg [y1*(w+1)+x1];
+          const s2 = intg2[(y2+1)*(w+1)+(x2+1)] - intg2[y1*(w+1)+(x2+1)] - intg2[(y2+1)*(w+1)+x1] + intg2[y1*(w+1)+x1];
+          const mean = s/n;
+          const std  = Math.sqrt(Math.max(0, s2/n - mean*mean));
+          out[y*w+x] = gray[y*w+x] >= mean*(1+k*(std/R-1)) ? 255 : 0;
+        }
+      }
+
+      // 4. Write binarised image back (black text / white bg)
+      for (let i = 0; i < out.length; i++) {
+        d[i*4] = d[i*4+1] = d[i*4+2] = out[i]; d[i*4+3] = 255;
+      }
+
+      // 5. Laplacian sharpening to recover thin strokes
+      const pre = new Uint8ClampedArray(d);
+      for (let y = 1; y < h-1; y++) {
+        for (let x = 1; x < w-1; x++) {
+          const idx = (y*w+x)*4;
+          const v = Math.min(255, Math.max(0,
+            -pre[((y-1)*w+x)*4] - pre[(y*w+x-1)*4] +
+             5*pre[idx] -
+             pre[(y*w+x+1)*4] - pre[((y+1)*w+x)*4]
+          ));
+          d[idx] = d[idx+1] = d[idx+2] = v;
         }
       }
 
       ctx.putImageData(imageData, 0, 0);
-      resolve(canvas.toDataURL("image/png")); // PNG = lossless, better for OCR
+      resolve(canvas.toDataURL("image/png"));
     };
+    img.onerror = () => resolve(imageSrc);
     img.src = imageSrc;
   });
 }
@@ -1212,63 +1212,104 @@ function parseMenuText(rawText, columnLabels) {
 
 // ─── Page: Menu Manager ───────────────────────────────────────────────────────
 function MenuPage({ menu, setMenu, toast }) {
-  const [mediaItems, setMediaItems] = useState([]);
+  // Restore uploaded images/PDFs from localStorage so they persist after refresh
+  const [mediaItems, setMediaItems] = useState(() => {
+    try {
+      return DB.get("mediaItems", []).map(m => ({ ...m, ocrDone: true }));
+    } catch { return []; }
+  });
   const [showCam,    setShowCam]    = useState(false);
   const [camStream,  setCamStream]  = useState(null);
   const [flashOn,    setFlashOn]    = useState(false);
   const [drag,       setDrag]       = useState(false);
   const [ocrItems,   setOcrItems]   = useState([]);
-  const [ocrRawText, setOcrRawText] = useState("");   // show raw text for manual review
+  const [ocrRawText, setOcrRawText] = useState("");
   const [showRaw,    setShowRaw]    = useState(false);
   const [form,       setForm]       = useState({ name:"", category:"", price:"" });
   const videoRef    = useRef(null);
   const imgInputRef = useRef(null);
   const pdfInputRef = useRef(null);
 
-  // ── Real Tesseract.js OCR with image preprocessing ────────────────────────
+  // Persist media items on every change (strip rawText blob to save space)
+  useEffect(() => {
+    DB.set("mediaItems", mediaItems.map(({ rawText, ...r }) => r));
+  }, [mediaItems]);
+
+  // ── Common OCR misread corrections (restaurant domain) ─────────────────────
+  // Tesseract frequently confuses these character pairs in menu fonts
+  const fixOcrText = (t) => t
+    // Number/letter swaps
+    .replace(/\b0(?=[a-zA-Z])/g, "O")       // 0ld → Old
+    .replace(/(?<=[a-zA-Z])0\b/g, "o")       // Mang0 → Mango
+    .replace(/\bl\b/g, "1")                  // lone l between spaces = 1
+    .replace(/(?<=\d)l(?=\d)/g, "1")         // 1l0 → 110
+    .replace(/(?<=\s)I(?=\s)/g, "1")         // space-I-space = 1
+    .replace(/\bVVeg\b/gi, "Veg")            // doubled V
+    .replace(/\bPanear\b/gi, "Paneer")
+    .replace(/\bPaneer\s+Tikk[ae]\b/gi, "Paneer Tikka")
+    .replace(/\bBiryam\b/gi, "Biryani")
+    .replace(/\bBuger\b/gi, "Burger")
+    .replace(/\bBurqer\b/gi, "Burger")
+    .replace(/\bChiken\b/gi, "Chicken")
+    .replace(/\bNann?\b/gi, "Naan")
+    .replace(/\bLassi\b/gi, "Lassi")
+    .replace(/\bMom[o0]\b/gi, "Momo")
+    .replace(/\bFrise\b/gi, "Fries")
+    .replace(/\bFri[e3]s\b/gi, "Fries")
+    // Price separators — normalise
+    .replace(/(\d)\s*[|l]\s*-/g, "$1/-")     // 40l- → 40/-
+    .replace(/(\d)\s*\/\s*\-/g, "$1/-")      // 40 /- → 40/-
+    .replace(/Rs\s*\.\s*/gi, "Rs.")
+    // Strip stray pipe/underscores between words
+    .replace(/([a-zA-Z])\s*[|_]\s*([a-zA-Z])/g, "$1 $2");
+
+  // ── 3-pass Tesseract OCR ────────────────────────────────────────────────────
   const runOCR = async (id, imageSrc) => {
     await loadTesseract();
     const { createWorker } = window.Tesseract;
 
-    // Preprocess: upscale + grayscale + contrast boost + sharpen
     let processedSrc;
-    try {
-      processedSrc = await preprocessImageForOCR(imageSrc);
-    } catch {
-      processedSrc = imageSrc; // fallback to original
-    }
+    try { processedSrc = await preprocessImageForOCR(imageSrc); }
+    catch { processedSrc = imageSrc; }
 
     const worker = await createWorker("eng", 1, { logger: () => {} });
 
-    // PSM 4 = single column variable-size text — best for menu cards
-    // PSM 6 = uniform block — good fallback
-    // We run BOTH and merge results for maximum coverage
-    let rawText4 = "", rawText6 = "";
-    try {
-      await worker.setParameters({
-        tessedit_pageseg_mode: "4",
-        tessedit_char_whitelist:
-          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789₹/-.,()'& ",
-        preserve_interword_spaces: "1",
-      });
-      const r4 = await worker.recognize(processedSrc);
-      rawText4 = r4.data.text;
+    // Common params for all passes
+    const baseParams = {
+      tessedit_char_whitelist:
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789₹/-.,()'& ",
+      preserve_interword_spaces: "1",
+      // Tell Tesseract to treat / and - as ordinary chars (not line-end hyphens)
+      tessedit_preserve_blkword_pos: "0",
+    };
 
-      await worker.setParameters({ tessedit_pageseg_mode: "6" });
-      const r6 = await worker.recognize(processedSrc);
-      rawText6 = r6.data.text;
-    } catch (e) {
+    let texts = [];
+    try {
+      // Pass 1 – PSM 4: single column, variable text sizes (best for card-style menus)
+      await worker.setParameters({ ...baseParams, tessedit_pageseg_mode: "4" });
+      texts.push((await worker.recognize(processedSrc)).data.text);
+
+      // Pass 2 – PSM 6: uniform block (best for grid/table menus)
+      await worker.setParameters({ ...baseParams, tessedit_pageseg_mode: "6" });
+      texts.push((await worker.recognize(processedSrc)).data.text);
+
+      // Pass 3 – PSM 11: sparse text, no OSD — catches items in fancy/decorative fonts
+      await worker.setParameters({ ...baseParams, tessedit_pageseg_mode: "11" });
+      texts.push((await worker.recognize(processedSrc)).data.text);
+    } catch {
       toast("OCR failed — try a clearer photo with good lighting");
     } finally {
       await worker.terminate();
     }
 
-    // Merge both passes — use the one with more price hits as primary,
-    // then fill in any unique items from the other pass
-    const countPrices = (t) => (t.match(/\d{2,4}\s*\/-/g) || []).length + (t.match(/\d{2,4}/g) || []).length;
-    const primary   = countPrices(rawText4) >= countPrices(rawText6) ? rawText4 : rawText6;
-    const secondary = primary === rawText4 ? rawText6 : rawText4;
-    const combined  = primary + "\n" + secondary;
+    // Apply domain corrections to all passes
+    texts = texts.map(fixOcrText);
+
+    // Pick the pass with the most price hits as primary display text
+    const countPrices = (t) => (t.match(/\d{2,4}\s*\/-/g)||[]).length * 2 + (t.match(/\d{2,4}/g)||[]).length;
+    texts.sort((a, b) => countPrices(b) - countPrices(a));
+    const primary  = texts[0] || "";
+    const combined = texts.join("\n");
 
     setMediaItems(prev => prev.map(m => m.id === id ? { ...m, ocrDone: true, rawText: primary } : m));
     setOcrRawText(prev => prev + (prev ? "\n\n--- new scan ---\n\n" : "") + primary);
@@ -1276,7 +1317,7 @@ function MenuPage({ menu, setMenu, toast }) {
     const parsed = parseMenuText(combined);
 
     if (parsed.length === 0) {
-      toast("OCR found no items — ensure good lighting, hold camera steady, and avoid glare");
+      toast("No items found — check lighting, avoid glare, keep menu flat");
     } else {
       setOcrItems(prev => {
         const existing = new Set(prev.map(i => i.name.toLowerCase()));
@@ -1288,7 +1329,7 @@ function MenuPage({ menu, setMenu, toast }) {
 
   const addMedia = (type, src, name) => {
     const id = generateId();
-    setMediaItems(prev => [...prev, { id, type, src, name, ocrDone:false }]);
+    setMediaItems(prev => [...prev, { id, type, src, name, ocrDone:false, ts:Date.now() }]);
     if (type === "image" && src) runOCR(id, src);
     else {
       // PDF: no browser-side OCR without a server; mark done and guide user
@@ -1410,33 +1451,66 @@ function MenuPage({ menu, setMenu, toast }) {
             )}
           </div>
 
-          {/* Media gallery */}
-          {mediaItems.length > 0 && (
-            <div style={{ marginTop:14 }}>
-              <div style={{ fontSize:11, color:"var(--muted)", fontWeight:600, textTransform:"uppercase", letterSpacing:".06em", marginBottom:8 }}>
-                Captured / Uploaded ({mediaItems.length})
+          {/* ── Recent Uploads — always visible, persists across sessions ── */}
+          <div style={{ marginTop:16, borderTop:"1px solid var(--border)", paddingTop:14 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+              <div style={{ fontSize:11, color:"var(--muted)", fontWeight:700, textTransform:"uppercase", letterSpacing:".06em" }}>
+                🕓 Recent Uploads {mediaItems.length > 0 && `(${mediaItems.length})`}
               </div>
+              {mediaItems.length > 0 && (
+                <button className="btn btn-ghost" style={{ padding:"2px 10px", fontSize:11 }} title="Clear all uploads"
+                  onClick={() => { setMediaItems([]); setOcrItems([]); setOcrRawText(""); }}>
+                  🗑 Clear all
+                </button>
+              )}
+            </div>
+
+            {mediaItems.length === 0 ? (
+              <div style={{ textAlign:"center", padding:"18px 0", color:"var(--muted)", fontSize:13 }}>
+                <div style={{ fontSize:28, marginBottom:6 }}>📂</div>
+                No uploads yet — captured photos &amp; PDFs will appear here
+              </div>
+            ) : (
               <div className="media-gallery">
                 {mediaItems.map(m => (
                   <div key={m.id} className="media-thumb">
                     {m.type === "image"
-                      ? <img src={m.src} alt="menu scan" />
-                      : <div className="pdf-badge"><span style={{ fontSize:26 }}>📄</span><span style={{ wordBreak:"break-all" }}>{m.name.slice(0,18)}</span></div>
+                      ? <img src={m.src} alt="menu scan" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                      : <div className="pdf-badge">
+                          <span style={{ fontSize:28 }}>📄</span>
+                          <span style={{ wordBreak:"break-all", fontSize:10, textAlign:"center", padding:"0 4px" }}>
+                            {m.name.slice(0, 20)}
+                          </span>
+                        </div>
                     }
-                    <div style={{ position:"absolute", bottom:0, left:0, right:0, padding:"4px 6px", background:m.ocrDone?"#06d6a0cc":"#000000cc", fontSize:10, textAlign:"center", color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", gap:4 }}>
-                      {m.ocrDone ? "✓ OCR Done" : (
-                        <><div style={{ width:8, height:8, border:"1.5px solid #fff", borderTopColor:"transparent", borderRadius:"50%", animation:"spin .6s linear infinite" }} /> Scanning…</>
-                      )}
+                    {/* Status bar */}
+                    <div style={{ position:"absolute", bottom:0, left:0, right:0, padding:"3px 6px",
+                      background: m.ocrDone ? "#06d6a0cc" : "#000000cc",
+                      fontSize:9, textAlign:"center", color:"#fff",
+                      display:"flex", alignItems:"center", justifyContent:"center", gap:4 }}>
+                      {m.ocrDone
+                        ? "✓ Done"
+                        : <><div style={{ width:7, height:7, border:"1.5px solid #fff", borderTopColor:"transparent", borderRadius:"50%", animation:"spin .6s linear infinite" }} /> Scanning…</>
+                      }
                     </div>
+                    {/* Timestamp badge */}
+                    {m.ts && (
+                      <div style={{ position:"absolute", top:4, left:4, background:"#000000bb",
+                        borderRadius:4, padding:"1px 5px", fontSize:9, color:"#ffffffcc" }}>
+                        {new Date(m.ts).toLocaleDateString("en-IN",{day:"numeric",month:"short"})}
+                      </div>
+                    )}
                     <button className="remove-btn" onClick={() => removeMedia(m.id)}>✕</button>
                   </div>
                 ))}
+                {/* Add-more tile */}
                 <button className="media-add-btn" onClick={() => imgInputRef.current.click()}>
-                  <span>＋</span><span style={{ fontSize:11 }}>Add more</span>
+                  <span style={{ fontSize:22 }}>＋</span>
+                  <span style={{ fontSize:10 }}>Add photo</span>
                 </button>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* OCR detected items — editable before adding */}
           {ocrItems.length > 0 && (
